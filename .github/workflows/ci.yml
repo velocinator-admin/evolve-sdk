@@ -60,6 +60,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: pnpm --filter next-evolve test:int
       - run: pnpm --filter fixture exec playwright install --with-deps chromium
       - run: pnpm --filter fixture test:e2e
       - run: pnpm --filter fixture-next15 test:e2e
@@ -68,3 +69,30 @@ jobs:
         with:
           name: playwright-report
           path: apps/*/test-results
+
+  postgres-14:
+    name: DB integration (Postgres 14, oldest supported)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: evolve
+          POSTGRES_PASSWORD: evolve
+          POSTGRES_DB: customer
+        ports: ["54329:5432"]
+        options: >-
+          --health-cmd "pg_isready -U evolve -d customer"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      EVOLVE_DATABASE_URL: postgres://evolve:evolve@localhost:54329/customer
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build --filter=next-evolve...
+      - run: pnpm --filter next-evolve test:int

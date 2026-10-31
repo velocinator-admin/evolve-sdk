@@ -9,8 +9,15 @@ export { TEST_SITE };
 export const HUMAN_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 
+/** Customer DB (docker compose in the repo root). */
+export const DB_URL =
+  process.env.EVOLVE_DATABASE_URL ?? "postgres://evolve:evolve@localhost:54329/customer";
+export const TRACK_SECRET = "trk_fixture_e2e";
+
 /** Env for the fixture app when it runs against the fake cloud. */
 export const appEnv = {
+  EVOLVE_DATABASE_URL: DB_URL,
+  EVOLVE_TRACK_SECRET: TRACK_SECRET,
   EVOLVE_CLOUD_URL: CLOUD_URL,
   EVOLVE_SECRET_KEY: TEST_SECRET_KEY,
   EVOLVE_UNSAFE_TEST_PUBLIC_KEY: TEST_PUBLIC_KEY_ENV,

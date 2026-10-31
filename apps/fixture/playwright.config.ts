@@ -12,7 +12,22 @@ export default defineConfig({
   },
   projects: [
     { name: "setup", testMatch: /global\.setup\.ts/ },
-    { name: "chromium", dependencies: ["setup"], use: { browserName: "chromium" } },
+    {
+      name: "chromium",
+      dependencies: ["setup"],
+      use: {
+        browserName: "chromium",
+        launchOptions: {
+          args: [
+            // The beacon is off when navigator.webdriver is set; this flag clears it.
+            "--disable-blink-features=AutomationControlled",
+            // Beacons sent while a page unloads ignore Playwright's per-context UA and
+            // say "HeadlessChrome" (a bot to Evolve); set the UA browser-wide too.
+            `--user-agent=${HUMAN_UA}`,
+          ],
+        },
+      },
+    },
   ],
   webServer: [
     {

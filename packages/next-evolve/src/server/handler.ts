@@ -33,7 +33,7 @@ export function createEvolveHandler(opts: EvolveHandlerOptions) {
     return parts[parts.length - 1] ?? "";
   };
 
-  async function POST(req: Request): Promise<Response> {
+  async function post(req: Request): Promise<Response> {
     try {
       switch (action(req)) {
         case "collect": {
@@ -64,7 +64,7 @@ export function createEvolveHandler(opts: EvolveHandlerOptions) {
     }
   }
 
-  async function GET(req: Request): Promise<Response> {
+  async function get(req: Request): Promise<Response> {
     if (action(req) !== "health") return notFound();
     return Response.json({
       ok: true,
@@ -73,5 +73,5 @@ export function createEvolveHandler(opts: EvolveHandlerOptions) {
     });
   }
 
-  return { GET, POST };
+  return { GET: get, POST: post };
 }

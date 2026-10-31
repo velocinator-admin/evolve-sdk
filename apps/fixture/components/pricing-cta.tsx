@@ -7,7 +7,7 @@ export const pricingCtaSchema = z.object({
 
 function PricingCta(props: z.infer<typeof pricingCtaSchema>) {
   return (
-    <a href="/signup" data-testid="pricing-cta">
+    <a href="/signup" data-testid="pricing-cta" data-evolve-goal="pricing_cta">
       {props.label}
     </a>
   );
