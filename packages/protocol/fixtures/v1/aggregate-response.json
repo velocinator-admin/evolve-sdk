@@ -1,0 +1,95 @@
+{
+  "pv": 1,
+  "requestId": "agr_7f3kq9w2m4x8z1c5v6b7n0aa",
+  "site": "site_ab12cd34ef",
+  "asOf": "2026-12-01T10:00:00Z",
+  "sdk": "0.1.0",
+  "mode": "incremental",
+  "durationMs": 812,
+  "partial": false,
+  "remaining": [],
+  "rows": [
+    {
+      "exp": "k3j9x2",
+      "var": "a8f2l1",
+      "goal": "signed_up",
+      "seg": "main",
+      "day": "2026-11-20",
+      "n": 412,
+      "c": 19,
+      "s1": 0,
+      "s2": 0,
+      "mn": 412,
+      "mc": 19,
+      "ms1": 0,
+      "ms2": 0
+    },
+    {
+      "exp": "k3j9x2",
+      "var": "c1d2e3",
+      "goal": "signed_up",
+      "seg": "main",
+      "day": "2026-11-20",
+      "n": 405,
+      "c": 27,
+      "s1": 0,
+      "s2": 0,
+      "mn": 405,
+      "mc": 27,
+      "ms1": 0,
+      "ms2": 0
+    },
+    {
+      "exp": "k3j9x2",
+      "var": "f4g5h6",
+      "goal": "signed_up",
+      "seg": "main",
+      "day": "2026-11-20",
+      "n": 398,
+      "c": 22,
+      "s1": 0,
+      "s2": 0,
+      "mn": 398,
+      "mc": 22,
+      "ms1": 0,
+      "ms2": 0
+    },
+    {
+      "exp": "k3j9x2",
+      "var": "a8f2l1",
+      "goal": "paid",
+      "seg": "main",
+      "day": "2026-11-20",
+      "n": 412,
+      "c": 3,
+      "s1": 147,
+      "s2": 7203,
+      "mn": 412,
+      "mc": 3,
+      "ms1": 147,
+      "ms2": 7203
+    },
+    {
+      "exp": "k3j9x2",
+      "var": "c1d2e3",
+      "goal": "paid",
+      "seg": "main",
+      "day": "2026-11-20",
+      "n": 405,
+      "c": 5,
+      "s1": 245,
+      "s2": 12005,
+      "mn": 405,
+      "mc": 5,
+      "ms1": 245,
+      "ms2": 12005
+    }
+  ],
+  "usage": [
+    {
+      "day": "2026-11-30",
+      "testedPageviews": 5120
+    }
+  ],
+  "errors": []
+}

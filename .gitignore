@@ -2,3 +2,12 @@
 node_modules/
 .env*
 !.env.example
+dist/
+.next/
+.turbo/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+.evolve/
+test-results/
+playwright-report/

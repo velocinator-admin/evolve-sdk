@@ -1,0 +1,54 @@
+name: Release
+
+# Changesets: on main, either opens a "Version packages" PR or, once that PR is
+# merged, publishes next-evolve and @next-evolve/protocol to npm.
+# Auth: NPM_TOKEN (npm automation token) in Actions secrets. Trusted publishing
+# (OIDC) also works from a private repo once configured on npmjs.com; the
+# id-token permission below is there for it. Provenance stays off while the
+# repo is private.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack and dry-run publish only"
+        type: boolean
+        default: true
+
+concurrency: release-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build --filter='./packages/*'
+
+      - name: Dry-run publish
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: pnpm -r --filter='./packages/*' publish --dry-run --no-git-checks --access public
+
+      - name: Version PR or publish
+        if: github.event_name == 'push' || !inputs.dry_run
+        uses: changesets/action@v1
+        with:
+          publish: pnpm release
+          version: pnpm changeset version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: false

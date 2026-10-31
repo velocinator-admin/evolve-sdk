@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  check:
+    name: Lint, typecheck, unit, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build --cache-dir=.turbo
+      - run: pnpm typecheck --cache-dir=.turbo
+      - run: pnpm test --cache-dir=.turbo
+      - run: pnpm --filter fixture check:server-only
+
+  integration:
+    name: Integration + e2e (customer Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: evolve
+          POSTGRES_PASSWORD: evolve
+          POSTGRES_DB: customer
+        ports: ["54329:5432"]
+        options: >-
+          --health-cmd "pg_isready -U evolve -d customer"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      EVOLVE_DATABASE_URL: postgres://evolve:evolve@localhost:54329/customer
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --filter fixture exec playwright install --with-deps chromium
+      - run: pnpm --filter fixture test:e2e
+      - run: pnpm --filter fixture-next15 test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/*/test-results

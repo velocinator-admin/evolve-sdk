@@ -1,0 +1,15 @@
+# "Customer" Postgres for the fixture app and SDK integration tests.
+services:
+  customer-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: evolve
+      POSTGRES_PASSWORD: evolve
+      POSTGRES_DB: customer
+    ports:
+      - "54329:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolve -d customer"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
