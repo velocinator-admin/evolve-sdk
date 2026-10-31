@@ -16,7 +16,7 @@
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "changeset": "changeset",
-    "release": "turbo run build --filter=./packages/* && changeset publish"
+    "release": "turbo run build --filter='./packages/*' && changeset publish"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
