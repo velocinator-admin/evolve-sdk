@@ -37,7 +37,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsdown && node scripts/check-dist.mjs && node scripts/check-proxy-imports.mjs",
+    "build": "tsdown && node scripts/check-dist.mjs && node scripts/check-proxy-imports.mjs && node scripts/check-size.mjs",
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit",
@@ -68,5 +68,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "bin": {
+    "next-evolve": "./dist/cli/index.js"
   }
 }
