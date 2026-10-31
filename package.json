@@ -1,0 +1,31 @@
+{
+  "name": "evolve-sdk",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "changeset": "changeset",
+    "release": "turbo run build --filter=./packages/* && changeset publish"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.4",
+    "@changesets/cli": "3.0.3",
+    "@types/node": "^22.19.0",
+    "tsdown": "0.23.4",
+    "turbo": "2.11.10",
+    "typescript": "5.9.3",
+    "unrun": "^0.3.1",
+    "vitest": "5.0.5"
+  }
+}
