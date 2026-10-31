@@ -1,4 +1,4 @@
-/** `next-evolve/config`: `defineConfig` (and `defineGoals`, added in E5). */
+/** `next-evolve/config`: `defineConfig` and `defineGoals`. */
 export {
   defineConfig,
   type EvolveConfig,
@@ -6,3 +6,13 @@ export {
   type RouteConfig,
   resolveConfig,
 } from "./config";
+export {
+  defineGoals,
+  type EventGoal,
+  type GoalDefinition,
+  type GoalEvent,
+  type Goals,
+  type GoalWindow,
+  type PageviewGoal,
+  serializeGoals,
+} from "./goals";
