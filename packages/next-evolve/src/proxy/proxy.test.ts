@@ -1,4 +1,6 @@
-import { TEST_SITE } from "@next-evolve/fake-cloud";
+import { TEST_KEY, TEST_PUBLIC_KEY_ENV, TEST_SECRET_KEY, TEST_SITE } from "@next-evolve/fake-cloud";
+import { PREVIEW_TYP } from "@next-evolve/protocol";
+import { generateTestKeyPair, signJws } from "@next-evolve/protocol/testing";
 import { getRewrittenUrl, isRewrite } from "next/experimental/testing/server";
 import type { NextResponse } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -161,6 +163,53 @@ describe("proxy (static mode)", () => {
       },
     );
     expect(res!.cookies.get("evolve_id")?.secure).toBe(false);
+  });
+});
+
+describe("preview tokens", () => {
+  const env = {
+    NODE_ENV: "development",
+    EVOLVE_SECRET_KEY: TEST_SECRET_KEY,
+    EVOLVE_UNSAFE_TEST_PUBLIC_KEY: TEST_PUBLIC_KEY_ENV,
+  };
+  const token = (payload: object) => signJws(payload, { ...TEST_KEY, typ: PREVIEW_TYP });
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  const runPv = (req: ReturnType<typeof request>) =>
+    applyEvolve(config, req, event, { store: storeWith(), env, random: fixed(0.1) });
+
+  it("a valid token forces the code, sets a session evolve_pv cookie and no assignment cookies", () => {
+    const t = token({ site: TEST_SITE, code: "ev_k3j9x2-c1d2e3", exp });
+    const res = runPv(request(`/?evolve_preview=${t}`));
+    expect(rewritten(res)).toBe(`/ev_k3j9x2-c1d2e3?evolve_preview=${t}`);
+    const pv = res!.cookies.get("evolve_pv");
+    expect(pv?.value).toBe(t);
+    expect(pv?.maxAge).toBeUndefined();
+    expect(res!.cookies.get("evolve_a")).toBeUndefined();
+    expect(res!.cookies.get("evolve_id")).toBeUndefined();
+  });
+
+  it("the evolve_pv cookie keeps the preview on later pages", () => {
+    const t = token({ site: TEST_SITE, code: "ev_k3j9x2-c1d2e3.p7q8r9-m1n2o3", exp });
+    const res = runPv(request("/pricing", { cookies: { evolve_pv: t } }));
+    expect(rewritten(res)).toBe("/ev_k3j9x2-c1d2e3.p7q8r9-m1n2o3/pricing");
+    expect(res!.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("expired, other-site or forged tokens are ignored (normal assignment)", () => {
+    const bad = [
+      token({ site: TEST_SITE, code: "ev_k3j9x2-c1d2e3", exp: exp - 7200 }),
+      token({ site: "site_zzzzzzzzzz", code: "ev_k3j9x2-c1d2e3", exp }),
+      signJws(
+        { site: TEST_SITE, code: "ev_k3j9x2-c1d2e3", exp },
+        { ...generateTestKeyPair(TEST_KEY.kid), typ: PREVIEW_TYP },
+      ),
+      "not-a-token",
+    ];
+    for (const t of bad) {
+      const res = runPv(request(`/?evolve_preview=${t}`));
+      expect(rewritten(res)).toMatch(/^\/ev_k3j9x2-a8f2l1/);
+      expect(res!.cookies.get("evolve_pv")).toBeUndefined();
+    }
   });
 });
 

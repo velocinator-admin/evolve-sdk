@@ -1,4 +1,4 @@
-import { CONTROL_CODE, encodeCode, newAnonId } from "@next-evolve/protocol";
+import { CONTROL_CODE, encodeCode, newAnonId, verifyPreview } from "@next-evolve/protocol";
 import { type NextFetchEvent, type NextRequest, NextResponse } from "next/server";
 import { type EvolveConfig, normalizePath, resolveConfig } from "../config/config";
 import { assign } from "../core/assign";
@@ -7,16 +7,20 @@ import { HEADER_CODE, HEADER_PATH } from "../core/constants";
 import {
   ANON_COOKIE,
   ASSIGN_COOKIE,
+  PREVIEW_COOKIE,
   parseAssignments,
   serializeAssignments,
 } from "../core/cookies";
 import { logRateLimited } from "../core/log";
-import { getBundleStore, type RuntimeOptions } from "../store/runtime";
+import { getBundleStore, getSiteIdentity, type RuntimeOptions } from "../store/runtime";
 
 export type EvolveProxyOptions = RuntimeOptions & {
   /** Random source in [0, 1) (tests). */
   random?: () => number;
 };
+
+/** Query parameter carrying a preview token from the dashboard. */
+export const PREVIEW_PARAM = "evolve_preview";
 
 const detectors = new WeakMap<EvolveConfig, (ua: string | null) => boolean>();
 
@@ -60,8 +64,18 @@ export function applyEvolve(
       getBundleStore(cfg, opts)?.peek(event ? (p) => event.waitUntil(p) : undefined) ?? null;
 
     let code = CONTROL_CODE;
-    let setCookies: [string, string][] = [];
-    if (bundle && !isBot(req.headers.get("user-agent")) && cfg.consent?.(req) !== false) {
+    const setCookies: [name: string, value: string, session?: boolean][] = [];
+
+    // Preview links: a signed token forces a code; nothing is assigned or counted.
+    const fromQuery = req.nextUrl.searchParams.get(PREVIEW_PARAM);
+    const previewToken = fromQuery ?? req.cookies.get(PREVIEW_COOKIE)?.value;
+    const identity = previewToken ? getSiteIdentity(opts) : null;
+    const preview = previewToken && identity ? verifyPreview(previewToken, identity) : null;
+
+    if (preview) {
+      code = preview.code;
+      if (fromQuery) setCookies.push([PREVIEW_COOKIE, fromQuery, true]);
+    } else if (bundle && !isBot(req.headers.get("user-agent")) && cfg.consent?.(req) !== false) {
       const cookie = parseAssignments(req.cookies.get(ASSIGN_COOKIE)?.value);
       const a = assign(bundle, path, cookie, opts.random ?? Math.random);
       code = encodeCode(a.pairs);
@@ -78,17 +92,16 @@ export function applyEvolve(
       const secure =
         (req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", "")) === "https";
       const maxAge = cfg.cookies.maxAgeDays * 86_400;
-      for (const [name, value] of setCookies) {
+      for (const [name, value, session] of setCookies) {
         res.cookies.set(name, value, {
           path: "/",
-          maxAge,
+          ...(session ? {} : { maxAge }),
           sameSite: "lax",
           httpOnly: true,
           secure,
           ...(cfg.cookies.domain ? { domain: cfg.cookies.domain } : {}),
         });
       }
-      setCookies = [];
     }
   } catch (e) {
     logRateLimited("proxy", "proxy error; serving control", e);

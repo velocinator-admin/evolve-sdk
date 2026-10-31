@@ -7,6 +7,7 @@ export * from "./hmac";
 export * from "./ids";
 export * from "./jws";
 export * from "./keys";
+export * from "./preview";
 export * from "./sync";
 export * from "./verify-bundle";
 export * from "./version";
