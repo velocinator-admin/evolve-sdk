@@ -44,6 +44,7 @@
   },
   "dependencies": {
     "@next-evolve/protocol": "workspace:*",
+    "isbot": "5.2.2",
     "server-only": "^0.0.1"
   },
   "peerDependencies": {
@@ -53,6 +54,7 @@
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
+    "fast-check": "^4.10.2",
     "next": "16.4.3",
     "react": "19.3.1",
     "react-dom": "19.3.1",
