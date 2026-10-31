@@ -12,7 +12,10 @@ export function isServerless(env: Env = process.env): boolean {
  * Opens a connection pool. Prepared statements are off so pooled endpoints
  * (Neon's `-pooler` host, PgBouncer in transaction mode) work.
  */
-export function createSql(url: string, opts: { env?: Env; max?: number } = {}): Sql {
+export function createSql(
+  url: string,
+  opts: { env?: Env; max?: number; debug?: postgres.Options<Record<string, never>>["debug"] } = {},
+): Sql {
   return postgres(url, {
     max: opts.max ?? (isServerless(opts.env) ? 1 : 10),
     prepare: false,
@@ -20,6 +23,7 @@ export function createSql(url: string, opts: { env?: Env; max?: number } = {}): 
     connect_timeout: 10,
     onnotice: () => {},
     connection: { application_name: "next-evolve" },
+    ...(opts.debug ? { debug: opts.debug } : {}),
   });
 }
 
