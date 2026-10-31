@@ -1,0 +1,30 @@
+Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)
+Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.175 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)
+Googlebot-Image/1.0
+Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)
+Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.2; +https://openai.com/gptbot
+Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ChatGPT-User/1.0; +https://openai.com/bot)
+Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)
+Claude-User/1.0 (+Claude-User@anthropic.com)
+Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)
+Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)
+Mozilla/5.0 (compatible; DuckDuckBot-Https/1.1; https://duckduckgo.com/duckduckbot)
+Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)
+Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)
+Mozilla/5.0 (compatible; SemrushBot/7~bl; +http://www.semrush.com/bot.html)
+Mozilla/5.0 (Applebot/0.1; +http://www.apple.com/go/applebot)
+facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)
+Twitterbot/1.0
+LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)
+Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)
+Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)
+WhatsApp/2.23.20.0
+TelegramBot (like TwitterBot)
+Mozilla/5.0 (Linux; Android 11; moto g power (2022)) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36 Chrome-Lighthouse
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/125.0.0.0 Safari/537.36
+curl/8.4.0
+python-requests/2.31.0
+Go-http-client/1.1
+Wget/1.21.4
+node-fetch/1.0 (+https://github.com/bitinn/node-fetch)
+Vercelbot/0.1 (+https://vercel.com)
