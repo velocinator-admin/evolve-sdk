@@ -1,4 +1,4 @@
-import { type SerializedGoal, serializedGoalSchema } from "@next-evolve/protocol";
+import { GOAL_KEY_RE, type SerializedGoal, serializedGoalSchema } from "@next-evolve/protocol";
 import { logRateLimited } from "../core/log";
 
 /** `<n>m`, `<n>h` or `<n>d`, at most 365 days. */
@@ -40,8 +40,6 @@ export type PageviewGoal = Common & {
 
 export type GoalDefinition = EventGoal | PageviewGoal;
 export type Goals = Record<string, GoalDefinition>;
-
-export const GOAL_KEY_RE = /^[a-z][a-z0-9_]{0,47}$/;
 
 /** Identity helper for `evolve.goals.ts`: types plus validation (throws on mistakes). */
 export function defineGoals<const G extends Goals>(goals: G): G {

@@ -33,6 +33,7 @@ export type WriterOptions = {
 };
 
 export type Writer = {
+  readonly mode: "node" | "serverless";
   exposures(rows: ExposureRow[]): void;
   events(rows: EventRow[]): void;
   identities(rows: IdentityRow[]): void;
@@ -172,6 +173,7 @@ export function createWriter(opts: WriterOptions): Writer {
   }
 
   return {
+    mode,
     exposures(rows) {
       if (!rows.length) return;
       exposures.push(...rows);
