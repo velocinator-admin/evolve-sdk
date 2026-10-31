@@ -15,6 +15,7 @@ vi.mock("./context", () => ({ requestContext: () => ctx }));
 vi.mock("./render-bundle", () => ({
   getRenderBundle: (o?: { fresh?: boolean }) => getRenderBundle(o),
 }));
+vi.mock("next/navigation", () => ({ unstable_rethrow: () => {} }));
 vi.mock("next/headers", () => ({
   headers: async () => new Headers(headerCode.value ? { "x-evolve-a": headerCode.value } : {}),
 }));

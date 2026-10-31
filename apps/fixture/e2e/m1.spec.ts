@@ -92,6 +92,19 @@ test.describe("M1: hello variant from the proxy", () => {
     expect(await second.text()).toContain("Start free trial");
   });
 
+  test("dynamic mode: /features serves variants without moving the page", async ({ request }) => {
+    const b = await (
+      await request.get("/features", { headers: { cookie: "evolve_a=f5e6a7:fb0000" } })
+    ).text();
+    expect(b).toContain("All the tools, none of the flicker");
+    expect(b).toContain('data-evolve-v="fb0000"');
+    const a = await (
+      await request.get("/features", { headers: { cookie: "evolve_a=f5e6a7:fa0000" } })
+    ).text();
+    expect(a).toContain("Everything you need");
+    expect(a).toContain('data-evolve-v="fa0000"');
+  });
+
   test("Server-Timing reports the proxy's cost", async ({ request }) => {
     const st = (await request.get("/")).headers()["server-timing"] ?? "";
     expect(st).toMatch(/evolve;dur=\d+\.\d+/);

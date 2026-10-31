@@ -1,4 +1,6 @@
 import { type BundlePayload, CONTROL_CODE, type CodePair, decodeCode } from "@next-evolve/protocol";
+import { headers } from "next/headers";
+import { unstable_rethrow } from "next/navigation";
 import { createElement, type ReactElement } from "react";
 import type { z } from "zod";
 import { HEADER_CODE } from "../core/constants";
@@ -24,11 +26,13 @@ let warnedNoContext = false;
 async function currentCode(): Promise<string | null> {
   const ctx = requestContext();
   if (ctx.code) return ctx.code;
-  // Dynamic mode: the proxy passes the code as a request header.
+  // Dynamic mode: the proxy passes the code as a request header. Reading
+  // headers() also tells Next the route is dynamic, so its internal errors
+  // (e.g. during prerender) must propagate.
   try {
-    const { headers } = await import("next/headers");
     return (await headers()).get(HEADER_CODE);
-  } catch {
+  } catch (e) {
+    unstable_rethrow(e);
     return null;
   }
 }

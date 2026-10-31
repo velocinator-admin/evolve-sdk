@@ -23,7 +23,7 @@ export const appEnv = {
 export const M1_BUNDLE = {
   site: TEST_SITE,
   routing: {
-    routes: { "/": ["k3j9x2"], "/pricing": ["p7q8r9"] },
+    routes: { "/": ["k3j9x2"], "/pricing": ["p7q8r9"], "/features": ["f5e6a7"] },
     experiments: {
       k3j9x2: {
         status: "running",
@@ -32,6 +32,15 @@ export const M1_BUNDLE = {
         variants: [
           { id: "a8f2l1", w: 0.5 },
           { id: "c1d2e3", w: 0.5 },
+        ],
+      },
+      f5e6a7: {
+        status: "running",
+        traffic: 1,
+        control: "fa0000",
+        variants: [
+          { id: "fa0000", w: 0.5 },
+          { id: "fb0000", w: 0.5 },
         ],
       },
       p7q8r9: {
@@ -52,6 +61,13 @@ export const M1_BUNDLE = {
       region: "hero",
       ctrl: false,
       props: { title: "Ship 10x faster", subtitle: "From idea to production in a day" },
+    },
+    fa0000: { exp: "f5e6a7", region: "features-hero", ctrl: true, props: {} },
+    fb0000: {
+      exp: "f5e6a7",
+      region: "features-hero",
+      ctrl: false,
+      props: { title: "All the tools, none of the flicker" },
     },
     m1n2o3: { exp: "p7q8r9", region: "pricing-cta", ctrl: true, props: {} },
     s4t5u6: {
