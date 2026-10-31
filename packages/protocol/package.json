@@ -18,13 +18,15 @@
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./fixtures/*": "./fixtures/*"
   },
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "fixtures": "unrun scripts/write-fixtures.ts"
   },
   "dependencies": {
     "zod": "^4.6.7"
