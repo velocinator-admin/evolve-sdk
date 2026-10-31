@@ -1,7 +1,12 @@
 import { TEST_KEY, TEST_PUBLIC_KEY_ENV, TEST_SECRET_KEY, TEST_SITE } from "@next-evolve/fake-cloud";
 import { PREVIEW_TYP } from "@next-evolve/protocol";
 import { generateTestKeyPair, signJws } from "@next-evolve/protocol/testing";
-import { getRewrittenUrl, isRewrite } from "next/experimental/testing/server";
+// Next 16.4 ships the matcher helper under its old name (docs say unstable_doesProxyMatch).
+import {
+  unstable_doesMiddlewareMatch as doesProxyMatch,
+  getRewrittenUrl,
+  isRewrite,
+} from "next/experimental/testing/server";
 import type { NextResponse } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOOGLEBOT, keys, request, storeWith } from "../../test/proxy-helpers";
@@ -222,6 +227,36 @@ describe("proxy (dynamic mode)", () => {
     expect(isRewrite(res!)).toBe(false);
     expect(res!.headers.get("x-middleware-request-x-evolve-a")).toBe("ev_k3j9x2-c1d2e3");
     expect(res!.headers.get("x-middleware-request-x-evolve-path")).toBe("/features");
+  });
+});
+
+describe("prefetch and RSC requests", () => {
+  it("take the same path as documents (rewrite + sticky)", () => {
+    const cookies = { evolve_id: "a".repeat(22), evolve_a: "k3j9x2:c1d2e3" };
+    const variants: Record<string, string>[] = [
+      { rsc: "1" },
+      { rsc: "1", "next-router-prefetch": "1" },
+      { "next-router-state-tree": "%5B%22%22%5D", rsc: "1" },
+    ];
+    for (const headers of variants) {
+      const res = run(request("/pricing?_rsc=abc", { cookies, headers }), storeWith(), fixed(0.1));
+      expect(rewritten(res)).toBe("/ev_k3j9x2-c1d2e3.p7q8r9~s4t5u6/pricing?_rsc=abc");
+    }
+  });
+});
+
+describe("matcher (the init-written config)", () => {
+  const proxyConfig = { matcher: ["/", "/pricing", "/features", "/(ev_.*)"] };
+  const matches = (url: string) => doesProxyMatch({ config: proxyConfig, url });
+  it("covers every Evolve route and /ev_* paths", () => {
+    for (const u of ["/", "/pricing", "/features", "/ev_0", "/ev_0/pricing", "/ev_k3j9x2-c1d2e3"]) {
+      expect(matches(u), u).toBe(true);
+    }
+  });
+  it("leaves other paths alone", () => {
+    for (const u of ["/signup", "/api/evolve/collect", "/_next/static/chunk.js", "/pricing/x"]) {
+      expect(matches(u), u).toBe(false);
+    }
   });
 });
 

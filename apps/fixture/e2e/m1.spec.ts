@@ -120,6 +120,22 @@ test.describe("M1: hello variant from the proxy", () => {
     expect(cached.headers()["cache-control"]).toBe("private, no-store");
   });
 
+  test("client navigation keeps the assigned variants", async ({ browser, baseURL }) => {
+    const ctx = await browser.newContext();
+    await ctx.addCookies([
+      { name: "evolve_a", value: "k3j9x2:c1d2e3.p7q8r9:s4t5u6", url: baseURL! },
+    ]);
+    const page = await ctx.newPage();
+    await page.goto("/");
+    await expect(page.getByTestId("hero-title")).toHaveText(B_TITLE);
+    await page.getByRole("link", { name: "Pricing" }).click();
+    await expect(page).toHaveURL(/\/pricing$/);
+    await expect(page.getByTestId("pricing-cta")).toHaveText("Start free trial");
+    await page.getByRole("link", { name: "Home" }).click();
+    await expect(page.getByTestId("hero-title")).toHaveText(B_TITLE);
+    await ctx.close();
+  });
+
   test("Server-Timing reports the proxy's cost", async ({ request }) => {
     const st = (await request.get("/")).headers()["server-timing"] ?? "";
     expect(st).toMatch(/evolve;dur=\d+\.\d+/);
