@@ -133,6 +133,19 @@ describe("proxy (static mode)", () => {
     expect(rewritten(run(request("/"), broken))).toBe("/ev_0");
   });
 
+  it("Cache-Control: private, no-store off Vercel only", () => {
+    expect(run(request("/"))!.headers.get("cache-control")).toBe("private, no-store");
+    expect(run(request("/", { ua: GOOGLEBOT }))!.headers.get("cache-control")).toBe(
+      "private, no-store",
+    );
+    const onVercel = applyEvolve(config, request("/"), event, {
+      store: storeWith(),
+      env: { VERCEL: "1" },
+    });
+    expect(onVercel!.headers.get("cache-control")).toBeNull();
+    expect(run(request("/signup"))).toBeNull();
+  });
+
   it("adds Server-Timing", () => {
     expect(run(request("/"))!.headers.get("server-timing")).toMatch(/^evolve;dur=\d+\.\d{3}$/);
   });

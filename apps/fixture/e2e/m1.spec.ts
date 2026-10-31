@@ -105,6 +105,21 @@ test.describe("M1: hello variant from the proxy", () => {
     expect(a).toContain('data-evolve-v="fa0000"');
   });
 
+  test("Cache-Control stays private on next start (no shared caching of variants)", async ({
+    request,
+  }) => {
+    for (const p of ["/", "/pricing", "/features"]) {
+      const res = await request.get(p, {
+        headers: { cookie: "evolve_a=k3j9x2:c1d2e3.p7q8r9:s4t5u6" },
+      });
+      expect(res.headers()["cache-control"], p).toBe("private, no-store");
+    }
+    // Twice, so the second /pricing comes from the ISR cache.
+    const cached = await request.get("/pricing", { headers: { cookie: "evolve_a=p7q8r9:s4t5u6" } });
+    expect(cached.headers()["x-nextjs-cache"]).toBe("HIT");
+    expect(cached.headers()["cache-control"]).toBe("private, no-store");
+  });
+
   test("Server-Timing reports the proxy's cost", async ({ request }) => {
     const st = (await request.get("/")).headers()["server-timing"] ?? "";
     expect(st).toMatch(/evolve;dur=\d+\.\d+/);

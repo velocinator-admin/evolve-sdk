@@ -94,6 +94,10 @@ export function applyEvolve(
     logRateLimited("proxy", "proxy error; serving control", e);
     res = isStatic ? rewrite(req, CONTROL_CODE, path) : passThrough(req, CONTROL_CODE, path);
   }
+  // Off Vercel, a shared CDN in front of the app could cache one visitor's
+  // variant for everyone. Vercel's cache keys on the rewritten path.
+  if ((opts.env ?? process.env).VERCEL !== "1")
+    res.headers.set("cache-control", "private, no-store");
   res.headers.set("server-timing", `evolve;dur=${(performance.now() - t0).toFixed(3)}`);
   return res;
 }
