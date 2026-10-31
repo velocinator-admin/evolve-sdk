@@ -6,6 +6,8 @@ name: Release
 # (OIDC) also works from a private repo once configured on npmjs.com; the
 # id-token permission below is there for it. Provenance stays off while the
 # repo is private.
+# Pushes to main publish only once the repo variable RELEASE_ENABLED is "true"
+# (set it when NPM_TOKEN or trusted publishing is ready, before T12.8).
 
 on:
   push:
@@ -26,6 +28,7 @@ permissions:
 
 jobs:
   release:
+    if: github.event_name == 'workflow_dispatch' || vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
