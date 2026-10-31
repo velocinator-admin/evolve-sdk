@@ -1,5 +1,4 @@
 import { parseSecretKey } from "@next-evolve/protocol";
-import type { ResolvedConfig } from "../config/config";
 import { trustedKeys } from "../core/keys";
 import { fetchBundle } from "./fetch";
 import { type BundleStore, createMemoryStore } from "./memory";
@@ -31,7 +30,7 @@ const registry = (): Registry => {
  * valid secret key (then everything serves control).
  */
 export function getBundleStore(
-  config: ResolvedConfig,
+  config: { pollSeconds?: number },
   opts: RuntimeOptions = {},
 ): BundleStore | null {
   if (opts.store) return opts.store;
@@ -50,7 +49,7 @@ export function getBundleStore(
   const store = createMemoryStore({
     site,
     keys: trustedKeys(env),
-    pollMs: config.pollSeconds * 1000,
+    pollMs: (config.pollSeconds ?? (env.NODE_ENV === "production" ? 60 : 5)) * 1000,
     initialToken: opts.buildBundle ?? null,
     fetcher: cloudUrl ? (etag) => fetchBundle({ cloudUrl, secretKey, etag }) : undefined,
   });
