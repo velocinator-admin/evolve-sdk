@@ -53,6 +53,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@next-evolve/fake-cloud": "workspace:*",
     "@types/react": "^19.3.0",
     "fast-check": "^4.10.2",
     "next": "16.4.3",

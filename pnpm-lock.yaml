@@ -79,6 +79,9 @@ importers:
         specifier: ^0.0.1
         version: 0.0.1
     devDependencies:
+      '@next-evolve/fake-cloud':
+        specifier: workspace:*
+        version: link:../fake-cloud
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
