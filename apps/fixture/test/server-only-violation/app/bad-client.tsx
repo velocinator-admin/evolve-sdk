@@ -1,7 +1,7 @@
 "use client";
 
-import { SDK_NAME } from "next-evolve";
+import { evolveStaticParams } from "next-evolve";
 
 export function Bad() {
-  return <p>{SDK_NAME}</p>;
+  return <p>{evolveStaticParams().length}</p>;
 }

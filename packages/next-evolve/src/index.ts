@@ -1,4 +1,16 @@
 import "server-only";
 
-/** Server-only entry point: `Optimizable`, `optimizable`, `withEvolve` (added in E3). */
-export const SDK_NAME = "next-evolve";
+/** `next-evolve` (server components): regions, static-mode pages and metadata. */
+export {
+  getOptimizableMeta,
+  type OptimizableComponent,
+  type OptimizableMeta,
+  optimizable,
+} from "./react/optimizable";
+export { Optimizable, type OptimizableProps } from "./react/region";
+export {
+  type EvolvePageProps,
+  evolveMetadata,
+  evolveStaticParams,
+  withEvolve,
+} from "./react/with-evolve";
