@@ -25,8 +25,11 @@ export async function fetchBundle(opts: {
       signal: AbortSignal.timeout(opts.timeoutMs ?? 5000),
     });
     if (res.status === 304) return { status: "not_modified" };
-    if (!res.ok)
-      return { status: "error", code: res.status, message: await res.text().catch(() => "") };
+    if (!res.ok) {
+      // Keep logs short: an error page can be a whole HTML document.
+      const body = await res.text().catch(() => "");
+      return { status: "error", code: res.status, message: body.slice(0, 200) };
+    }
     return { status: "ok", token: (await res.text()).trim(), etag: res.headers.get("etag") };
   } catch (e) {
     return { status: "error", code: "network", message: String(e) };

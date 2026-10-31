@@ -73,4 +73,13 @@ describe("fetching from the fake cloud", () => {
       code: "network",
     });
   });
+
+  it("truncates a long error body", async () => {
+    const big = new Response("x".repeat(10_000), { status: 404 });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(big);
+    const r = await fetchBundle({ cloudUrl: cloud.url, secretKey: TEST_SECRET_KEY });
+    expect(r).toMatchObject({ status: "error", code: 404 });
+    expect(r.status === "error" && r.message?.length).toBe(200);
+    fetchSpy.mockRestore();
+  });
 });
