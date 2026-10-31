@@ -3,7 +3,10 @@ import Link from "next/link";
 import { EvolveScript } from "next-evolve/client";
 import type { ReactNode } from "react";
 
-export const metadata: Metadata = { title: "Acme (Evolve fixture)" };
+export const metadata: Metadata = {
+  title: "Acme (Evolve fixture)",
+  metadataBase: new URL("http://localhost:3100"),
+};
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

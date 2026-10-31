@@ -25,12 +25,15 @@ const { optimizable } = await import("./optimizable");
 const heroSchema = z.object({
   title: z.string().min(3).max(60),
   cta: z.string().max(24).optional(),
+  layout: z.enum(["left", "center"]).default("left"),
 });
 function HeroImpl(p: z.infer<typeof heroSchema> & { href?: string }) {
   return p as unknown as ReactElement;
 }
 const Hero = optimizable(HeroImpl, heroSchema);
 const control = { title: "Ship faster", cta: "Start free", href: "/signup" };
+/** What the component receives for control: schema defaults applied. */
+const controlOut = { ...control, layout: "left" };
 
 type El = ReactElement<Record<string, unknown>>;
 const render = (id = "hero") => Optimizable({ id, component: Hero, props: control }) as Promise<El>;
@@ -51,7 +54,7 @@ describe("<Optimizable>", () => {
     ctx.code = "ev_0";
     const [marker, props] = inspect(await render());
     expect(marker).toBeNull();
-    expect(props).toEqual(control);
+    expect(props).toEqual(controlOut);
     expect(getRenderBundle).not.toHaveBeenCalled();
   });
 
@@ -65,14 +68,14 @@ describe("<Optimizable>", () => {
       "data-evolve-v": "c1d2e3",
     });
     expect(marker).not.toHaveProperty("data-evolve-x");
-    expect(props).toEqual({ ...control, title: "Ship 10x faster" });
+    expect(props).toEqual({ ...controlOut, title: "Ship 10x faster" });
   });
 
   it("control variant is marked and counted, with control props", async () => {
     ctx.code = "ev_k3j9x2-a8f2l1";
     const [marker, props] = inspect(await render());
     expect(marker).toMatchObject({ "data-evolve-v": "a8f2l1" });
-    expect(props).toEqual(control);
+    expect(props).toEqual(controlOut);
   });
 
   it("render-only pair (~) is marked x", async () => {
@@ -88,7 +91,7 @@ describe("<Optimizable>", () => {
     ctx.code = "ev_k3j9x2-c1d2e3";
     const [marker, props] = inspect(await render());
     expect(marker).toHaveProperty("data-evolve-x", "");
-    expect(props).toEqual(control);
+    expect(props).toEqual(controlOut);
   });
 
   it("a missing variant refetches once; still missing → control, marked x", async () => {
@@ -97,7 +100,7 @@ describe("<Optimizable>", () => {
     expect(getRenderBundle).toHaveBeenCalledTimes(2);
     expect(getRenderBundle).toHaveBeenLastCalledWith({ fresh: true });
     expect(marker).toHaveProperty("data-evolve-x", "");
-    expect(props).toEqual(control);
+    expect(props).toEqual(controlOut);
   });
 
   it("a variant that appears after the refetch is rendered", async () => {
@@ -120,7 +123,7 @@ describe("<Optimizable>", () => {
     ctx.code = "ev_k3j9x2-c1d2e3";
     const [marker, props] = inspect(await render("footer"));
     expect(marker).toBeNull();
-    expect(props).toEqual(control);
+    expect(props).toEqual(controlOut);
   });
 
   it("dynamic mode reads the x-evolve-a header", async () => {
@@ -138,6 +141,6 @@ describe("<Optimizable>", () => {
 
   it("malformed code → control", async () => {
     ctx.code = "ev_nope";
-    expect(inspect(await render())).toEqual([null, control]);
+    expect(inspect(await render())).toEqual([null, controlOut]);
   });
 });

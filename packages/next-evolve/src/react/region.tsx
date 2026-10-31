@@ -7,12 +7,16 @@ import { requestContext } from "./context";
 import { getOptimizableMeta, type OptimizableComponent } from "./optimizable";
 import { getRenderBundle } from "./render-bundle";
 
+/** Control props: the schema's input type (defaults optional) plus the component's other props. */
+export type ControlProps<P extends object, S extends z.ZodObject> = Omit<P, keyof z.output<S>> &
+  z.input<S>;
+
 export type OptimizableProps<P extends object, S extends z.ZodObject> = {
   /** Region id, unique per site: /^[a-z0-9][a-z0-9-]{0,39}$/. */
   id: string;
   component: OptimizableComponent<P, S>;
-  /** Control props. Variant props are merged over these. */
-  props: P;
+  /** Control props. Variant props are merged over these; schema defaults apply. */
+  props: ControlProps<P, S>;
 };
 
 let warnedNoContext = false;
@@ -46,15 +50,26 @@ export async function Optimizable<P extends object, S extends z.ZodObject>({
   component,
   props,
 }: OptimizableProps<P, S>): Promise<ReactElement> {
-  const control = () => createElement(component, props);
   const meta = getOptimizableMeta(component);
   if (!meta) {
     logRateLimited(
       `optimizable:${id}`,
       `<Optimizable id="${id}">: component isn't wrapped with optimizable()`,
     );
-    return control();
+    return createElement(component, props as unknown as P);
   }
+  const editableOf = (o: Record<string, unknown>) => {
+    const out: Record<string, unknown> = {};
+    for (const k of meta.keys) if (k in o) out[k] = o[k];
+    return out;
+  };
+  // Control gets schema defaults too; if the developer's own props fail the schema, render them as-is.
+  const parsedControl = meta.schema.safeParse(editableOf(props));
+  const controlProps = {
+    ...props,
+    ...(parsedControl.success ? (parsedControl.data as object) : {}),
+  } as unknown as P;
+  const control = () => createElement(component, controlProps);
 
   const code = await currentCode();
   if (!code) {
@@ -91,10 +106,7 @@ export async function Optimizable<P extends object, S extends z.ZodObject>({
 
   if (variant.ctrl || Object.keys(variant.props).length === 0) return marker(attrs, control());
 
-  const merged: Record<string, unknown> = { ...props, ...variant.props };
-  const editable: Record<string, unknown> = {};
-  for (const k of meta.keys) if (k in merged) editable[k] = merged[k];
-  const parsed = meta.schema.safeParse(editable);
+  const parsed = meta.schema.safeParse(editableOf({ ...props, ...variant.props }));
   if (!parsed.success) {
     logRateLimited(
       `variant:${pair.var}`,
@@ -103,5 +115,8 @@ export async function Optimizable<P extends object, S extends z.ZodObject>({
     );
     return marker({ ...attrs, "data-evolve-x": "" }, control());
   }
-  return marker(attrs, createElement(component, { ...props, ...(parsed.data as object) } as P));
+  return marker(
+    attrs,
+    createElement(component, { ...props, ...(parsed.data as object) } as unknown as P),
+  );
 }
