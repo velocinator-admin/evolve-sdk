@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { EvolveScript } from "next-evolve/client";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = { title: "Acme (Evolve fixture)" };
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <Link href="/signup">Sign up</Link>
         </nav>
         <main style={{ padding: 16 }}>{children}</main>
+        <EvolveScript />
       </body>
     </html>
   );

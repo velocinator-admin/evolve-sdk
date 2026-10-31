@@ -9,3 +9,5 @@ coverage/
 *.tsbuildinfo
 next-env.d.ts
 .evolve/
+test-results/
+playwright-report/

@@ -1,2 +1,2 @@
-/** Browser entry: `EvolveScript`, `track`, `identify` (added in E5). */
-export {};
+/** Browser entry: `EvolveScript`, `track`, `identify`. */
+export { EvolveScript } from "./evolve-script";
