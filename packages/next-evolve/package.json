@@ -37,14 +37,16 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsdown && node scripts/check-dist.mjs",
+    "build": "tsdown && node scripts/check-dist.mjs && node scripts/check-proxy-imports.mjs",
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --project unit",
+    "test:int": "vitest run --project integration"
   },
   "dependencies": {
     "@next-evolve/protocol": "workspace:*",
     "isbot": "5.2.2",
+    "postgres": "3.4.9",
     "server-only": "^0.0.1"
   },
   "peerDependencies": {
