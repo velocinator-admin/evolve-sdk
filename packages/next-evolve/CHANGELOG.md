@@ -1,5 +1,11 @@
 # next-evolve
 
+## 0.2.2
+
+### Patch Changes
+
+- Fetch the signed bundle over node:http(s) instead of `fetch`. Rendering a variant the render-side bundle didn't know yet (a newly added variant or a preview link) refetched the bundle with an uncached `fetch` inside a static page, which Next fails at runtime ("Page changed from static to dynamic").
+
 ## 0.2.1
 
 ### Patch Changes
