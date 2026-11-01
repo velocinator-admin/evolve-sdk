@@ -53,6 +53,29 @@ describe("proxy (static mode)", () => {
     });
   });
 
+  it("concurrent first requests of one visitor (prefetch + click) agree on the variant", () => {
+    // No random source: the proxy draws from the visitor's evolve_id.
+    const b = storeWith((b) => {
+      b.routing.experiments.k3j9x2!.variants = [
+        { id: "a8f2l1", w: 0.5 },
+        { id: "c1d2e3", w: 0.5 },
+      ];
+    });
+    const seen = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const anon = `visitor${i}`.padEnd(22, "q");
+      const once = applyEvolve(config, request("/", { cookies: { evolve_id: anon } }), event, {
+        store: b,
+      });
+      const twice = applyEvolve(config, request("/", { cookies: { evolve_id: anon } }), event, {
+        store: b,
+      });
+      expect(once!.cookies.get("evolve_a")?.value).toBe(twice!.cookies.get("evolve_a")?.value);
+      seen.add(once!.cookies.get("evolve_a")!.value);
+    }
+    expect(seen.size).toBe(2); // both arms still get visitors
+  });
+
   it("is sticky for a returning visitor and sets no cookies", () => {
     const res = run(
       request("/", { cookies: { evolve_id: "a".repeat(22), evolve_a: "k3j9x2:a8f2l1" } }),

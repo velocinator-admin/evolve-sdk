@@ -1,7 +1,7 @@
 import { CONTROL_CODE, encodeCode, newAnonId, verifyPreview } from "@next-evolve/protocol";
 import { type NextFetchEvent, type NextRequest, NextResponse } from "next/server";
 import { type EvolveConfig, normalizePath, resolveConfig } from "../config/config";
-import { assign } from "../core/assign";
+import { assign, visitorDraw } from "../core/assign";
 import { createBotDetector } from "../core/bots";
 import { HEADER_CODE, HEADER_PATH } from "../core/constants";
 import {
@@ -77,13 +77,15 @@ export function applyEvolve(
       if (fromQuery) setCookies.push([PREVIEW_COOKIE, fromQuery, true]);
     } else if (bundle && !isBot(req.headers.get("user-agent")) && cfg.consent?.(req) !== false) {
       const cookie = parseAssignments(req.cookies.get(ASSIGN_COOKIE)?.value);
-      const a = assign(bundle, path, cookie, opts.random ?? Math.random);
+      const known = req.cookies.get(ANON_COOKIE)?.value;
+      const anon = known || newAnonId();
+      const a = assign(bundle, path, cookie, opts.random ?? visitorDraw(anon));
       code = encodeCode(a.pairs);
       const running = (bundle.routing.routes[path] ?? []).some(
         (e) => bundle.routing.experiments[e]?.status === "running",
       );
       if (running) {
-        if (!req.cookies.get(ANON_COOKIE)?.value) setCookies.push([ANON_COOKIE, newAnonId()]);
+        if (!known) setCookies.push([ANON_COOKIE, anon]);
         if (a.changed) setCookies.push([ASSIGN_COOKIE, serializeAssignments(a.assigned)]);
       }
     }

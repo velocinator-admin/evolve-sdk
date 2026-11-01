@@ -1,7 +1,7 @@
 import { decodeCode, encodeCode } from "@next-evolve/protocol";
 import { describe, expect, it } from "vitest";
 import { sampleBundle } from "../../test/samples";
-import { assign, weightedPick } from "./assign";
+import { assign, visitorDraw, weightedPick } from "./assign";
 
 const seq = (...xs: number[]) => {
   let i = 0;
@@ -101,6 +101,45 @@ describe("assign", () => {
     }
     expect(Math.abs(counts.get("a8f2l1")! / 100_000 - 0.2)).toBeLessThan(0.01);
     expect(Math.abs(counts.get("c1d2e3")! / 100_000 - 0.8)).toBeLessThan(0.01);
+  });
+});
+
+describe("visitorDraw (deterministic per visitor and experiment)", () => {
+  it("the same visitor gets the same variant on every request, whatever the path", () => {
+    const b = sampleBundle((b) => {
+      b.routing.routes["/pricing"] = ["p7q8r9", "k3j9x2"];
+      b.routing.experiments.p7q8r9!.status = "running";
+    });
+    for (let i = 0; i < 200; i++) {
+      const anon = `visitor-${i}`.padEnd(22, "x");
+      const home = assign(b, "/", new Map(), visitorDraw(anon)).assigned.get("k3j9x2");
+      const again = assign(b, "/", new Map(), visitorDraw(anon)).assigned.get("k3j9x2");
+      const viaPricing = assign(b, "/pricing", new Map(), visitorDraw(anon)).assigned.get("k3j9x2");
+      expect(again).toBe(home);
+      expect(viaPricing).toBe(home);
+    }
+  });
+
+  it("draws are uniform: 20k visitors land within ±1.5% of the weights", () => {
+    const b = sampleBundle((b) => {
+      b.routing.experiments.k3j9x2!.variants = [
+        { id: "a8f2l1", w: 0.2 },
+        { id: "c1d2e3", w: 0.8 },
+      ];
+    });
+    const counts = new Map<string, number>();
+    for (let i = 0; i < 20_000; i++) {
+      const v = assign(b, "/", new Map(), visitorDraw(`anon${i}`)).pairs[0]!.var;
+      counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+    expect(Math.abs(counts.get("a8f2l1")! / 20_000 - 0.2)).toBeLessThan(0.015);
+  });
+
+  it("returns values in [0, 1) that differ by key", () => {
+    const d = visitorDraw("AAAAAAAAAAAAAAAAAAAAAA");
+    const xs = ["k3j9x2:t", "k3j9x2:v", "p7q8r9:t", "p7q8r9:v"].map(d);
+    for (const x of xs) expect(x >= 0 && x < 1).toBe(true);
+    expect(new Set(xs).size).toBe(4);
   });
 });
 
