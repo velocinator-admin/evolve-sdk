@@ -1,5 +1,11 @@
 # next-evolve
 
+## 0.2.1
+
+### Patch Changes
+
+- Exposures record when the beacon arrived (`first_at`) instead of when the batch was written, so conversions that arrive before the next flush are no longer missed by aggregation.
+
 ## 0.2.0
 
 ### Minor Changes
