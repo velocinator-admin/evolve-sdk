@@ -395,6 +395,29 @@ export async function startFakeCloud(
       return send(200, { site, name: "Fake site", appUrl: appUrls.get(site) ?? null });
     }
 
+    if (url.pathname === "/v1/site/test" && req.method === "POST") {
+      if (!site) return send(401, { error: "invalid_key" });
+      const appUrl = appUrls.get(site) ?? manifests.get(site)?.appUrl ?? null;
+      if (!appUrl) {
+        const none = { ok: false, detail: "no app URL yet" };
+        return send(200, { ok: false, webhook: none, aggregate: none });
+      }
+      const hook = await webhook(appUrl, { site, body: { pv: PROTOCOL_VERSION, type: "ping" } });
+      const agg = await aggregate(appUrl, { experiments: [] }, { site }).catch(() => null);
+      const webhookResult =
+        hook.status >= 200 && hook.status < 300
+          ? { ok: true, detail: `HTTP ${hook.status}` }
+          : { ok: false, detail: hook.error ? "unreachable" : `HTTP ${hook.status}` };
+      const aggregateResult = agg?.verified
+        ? { ok: true, detail: "signed response verified" }
+        : { ok: false, detail: agg ? `HTTP ${agg.status}` : "unreachable" };
+      return send(200, {
+        ok: webhookResult.ok && aggregateResult.ok,
+        webhook: webhookResult,
+        aggregate: aggregateResult,
+      });
+    }
+
     if (url.pathname === "/v1/site/app-url" && req.method === "PUT") {
       if (!site) return send(401, { error: "invalid_key" });
       try {

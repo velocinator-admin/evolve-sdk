@@ -2,8 +2,11 @@
 // `npx next-evolve <command>` (spec §16).
 import { existsSync } from "node:fs";
 import { aggregateCommand } from "./aggregate";
+import { connectCommand } from "./connect";
+import { initCommand } from "./init";
 import { migrateCommand } from "./migrate";
 import { pullCommand } from "./pull";
+import { pushCommand } from "./push";
 
 type Env = Record<string, string | undefined>;
 type Command = {
@@ -13,6 +16,22 @@ type Command = {
 };
 
 const COMMANDS: Record<string, Command> = {
+  init: {
+    usage:
+      "init [--key] [--webhook-secret] [--db] [--app-url] [--mode] [--routes] [--yes] [--dry-run]",
+    summary: "Set Evolve up in this Next.js app (safe to re-run)",
+    run: async (args, env) => {
+      const interactive = process.stdin.isTTY && !args.includes("--yes") && !args.includes("-y");
+      if (!interactive) return initCommand(args, { env, ask: null });
+      const { createInterface } = await import("node:readline/promises");
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        return await initCommand(args, { env, ask: (q) => rl.question(q) });
+      } finally {
+        rl.close();
+      }
+    },
+  },
   migrate: {
     usage: "migrate [--url <postgres-url>]",
     summary: "Create or update the evolve schema in your database ($EVOLVE_DATABASE_URL)",
@@ -22,6 +41,16 @@ const COMMANDS: Record<string, Command> = {
     usage: "pull",
     summary: 'Write the verified bundle to .evolve/bundle.generated.ts (run as "prebuild")',
     run: (args, env) => pullCommand(args, { env }),
+  },
+  push: {
+    usage: "push",
+    summary: "Send routes and goals (the manifest) to Evolve Cloud now",
+    run: (args, env) => pushCommand(args, { env }),
+  },
+  connect: {
+    usage: "connect [--test] [--app-url <url>]",
+    summary: "Check the key; register the app URL; --test: can the cloud reach your app?",
+    run: (args, env) => connectCommand(args, { env }),
   },
   aggregate: {
     usage: "aggregate [--upload]",
