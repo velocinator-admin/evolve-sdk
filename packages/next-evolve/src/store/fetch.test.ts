@@ -20,6 +20,19 @@ beforeAll(async () => {
 afterAll(() => cloud.close());
 
 describe("fetching from the fake cloud", () => {
+  it("doesn't use the global fetch (Next's patched fetch throws in a static render)", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+      throw new Error("Dynamic server usage: revalidate: 0 fetch");
+    });
+    try {
+      const r = await fetchBundle({ cloudUrl: cloud.url, secretKey: TEST_SECRET_KEY });
+      expect(r.status).toBe("ok");
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("fetches and verifies a bundle with the test key", async () => {
     const r = await fetchBundle({ cloudUrl: cloud.url, secretKey: TEST_SECRET_KEY });
     expect(r.status).toBe("ok");
@@ -76,10 +89,12 @@ describe("fetching from the fake cloud", () => {
 
   it("truncates a long error body", async () => {
     const big = new Response("x".repeat(10_000), { status: 404 });
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(big);
-    const r = await fetchBundle({ cloudUrl: cloud.url, secretKey: TEST_SECRET_KEY });
+    const r = await fetchBundle({
+      cloudUrl: cloud.url,
+      secretKey: TEST_SECRET_KEY,
+      fetch: async () => big,
+    });
     expect(r).toMatchObject({ status: "error", code: 404 });
     expect(r.status === "error" && r.message?.length).toBe(200);
-    fetchSpy.mockRestore();
   });
 });
