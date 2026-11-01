@@ -116,7 +116,7 @@ export const config = { matcher: ${matcher}, runtime: "nodejs" };
 }
 
 /** Imports go after the last import line (or at the top). */
-function addImport(src: string, line: string): string {
+export function addImport(src: string, line: string): string {
   const lines = src.split("\n");
   let last = -1;
   lines.forEach((l, i) => {

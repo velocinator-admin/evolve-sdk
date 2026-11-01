@@ -1,4 +1,4 @@
-// T11.2 acceptance: init on a fresh app (against the fake cloud) → `next build` passes.
+// T11.2/T11.3 acceptance: init on a fresh app (static pages moved) (against the fake cloud) → `next build` passes.
 // The app lives inside apps/fixture so next, react and next-evolve resolve from its node_modules.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -112,7 +112,19 @@ export function runCli(cwd: string, args: string[], cloudUrl: string) {
 
 describe("init → next build (fresh app)", () => {
   it("builds, and the app's own env lines are untouched", { timeout: 240_000 }, async () => {
-    freshNextApp(dir);
+    freshNextApp(dir, {
+      "components/cta.tsx": 'export function Cta() {\n  return <a href="/signup">Go</a>;\n}\n',
+      "app/pricing/page.tsx": `import type { Metadata } from "next";
+import { Cta } from "../../components/cta";
+
+export const metadata: Metadata = { title: "Pricing" };
+
+export default function Pricing() {
+  return <Cta />;
+}
+`,
+      "app/pricing/loading.tsx": "export default function Loading() {\n  return <p>…</p>;\n}\n",
+    });
     const init = await runCli(
       dir,
       [
@@ -123,12 +135,18 @@ describe("init → next build (fresh app)", () => {
         "--webhook-secret",
         TEST_WEBHOOK_SECRET,
         "--routes",
-        "/",
+        "/ /pricing",
       ],
       cloud.url,
     );
     expect(init.status, init.stderr + init.stdout).toBe(0);
     expect(readFileSync(join(dir, ".env.local"), "utf8").startsWith("MY_OWN=1\n")).toBe(true);
+    // Static mode: both pages moved under [evolve] and wrapped (T11.3).
+    expect(existsSync(join(dir, "app/page.tsx"))).toBe(false);
+    expect(readFileSync(join(dir, "app/[evolve]/pricing/page.tsx"), "utf8")).toContain(
+      'evolveMetadata("/pricing", metadata)',
+    );
+    expect(existsSync(join(dir, "app/[evolve]/pricing/loading.tsx"))).toBe(true);
 
     const build = await exec(NEXT, ["build"], {
       cwd: dir,
@@ -136,6 +154,7 @@ describe("init → next build (fresh app)", () => {
     });
     expect(build.status, build.stdout + build.stderr).toBe(0);
     expect(build.stdout).toContain("Proxy");
+    expect(build.stdout).toContain("/[evolve]/pricing");
     expect(existsSync(join(dir, ".evolve/bundle.generated.ts"))).toBe(true);
   });
 });
