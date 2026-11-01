@@ -43,7 +43,11 @@ jobs:
 
       - name: Dry-run publish
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
-        run: pnpm -r --filter='./packages/*' publish --dry-run --no-git-checks --access public
+        run: |
+          npm whoami # fails on a missing or bad NPM_TOKEN
+          pnpm -r --filter='./packages/*' publish --dry-run --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Version PR or publish
         if: github.event_name == 'push' || !inputs.dry_run
