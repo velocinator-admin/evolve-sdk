@@ -3,14 +3,13 @@
 // Idempotent: a re-run plans nothing it already did. `--dry-run` prints the
 // diff and changes nothing (no install, no migration, no cloud writes).
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { parseSecretKey, WEBHOOK_SECRET_RE } from "@next-evolve/protocol";
 import { createSql } from "../db/client";
 import { migrate } from "../db/migrate";
 import { parseFlags } from "./args";
 import { getSiteInfo, putAppUrl } from "./cloud";
 import { type Detection, detectProject } from "./detect";
+import { fileEnv } from "./env-file";
 import {
   newTrackSecret,
   planConfig,
@@ -65,20 +64,6 @@ const DB_HELP = `Evolve stores events in your own Postgres (its own "evolve" sch
     Vercel Marketplace → Neon:  https://vercel.com/marketplace/neon
     Supabase:                   https://supabase.com/dashboard/new
     Neon:                       https://console.neon.tech/signup`;
-
-/** Reads a value from the app's .env.local / .env without touching process.env. */
-function fileEnv(root: string): Env {
-  const out: Env = {};
-  for (const f of [".env", ".env.local"]) {
-    try {
-      for (const line of readFileSync(join(root, f), "utf8").split("\n")) {
-        const m = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line);
-        if (m) out[m[1]!] = m[2]!.replace(/^(['"])(.*)\1$/, "$2");
-      }
-    } catch {}
-  }
-  return out;
-}
 
 export async function initCommand(args: string[], deps: InitDeps): Promise<number> {
   const out = deps.out ?? ((s) => console.warn(s));

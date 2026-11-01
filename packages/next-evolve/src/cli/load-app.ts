@@ -1,4 +1,5 @@
 // Loads the app's evolve.config / evolve.goals in the CLI (push, doctor).
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -41,4 +42,31 @@ export async function loadAppModules(
       error: `couldn't load ${configPath} (${e instanceof Error ? e.message : e})`,
     };
   }
+}
+
+/** Re-runs this CLI command with type stripping on (Node < 22.18 has it behind a flag). */
+export function reexecWithTypes(
+  command: string,
+  args: string[],
+  cwd: string,
+  env: Record<string, string | undefined>,
+  quiet = false,
+): number {
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--disable-warning=ExperimentalWarning",
+      "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+      process.argv[1]!,
+      command,
+      ...args,
+    ],
+    {
+      stdio: ["ignore", quiet ? "ignore" : "inherit", "inherit"],
+      cwd,
+      env: { ...process.env, ...env },
+    },
+  );
+  return child.status ?? 1;
 }

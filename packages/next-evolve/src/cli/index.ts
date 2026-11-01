@@ -3,6 +3,7 @@
 import { existsSync } from "node:fs";
 import { aggregateCommand } from "./aggregate";
 import { connectCommand } from "./connect";
+import { doctorCommand } from "./doctor";
 import { initCommand } from "./init";
 import { migrateCommand } from "./migrate";
 import { pullCommand } from "./pull";
@@ -51,6 +52,11 @@ const COMMANDS: Record<string, Command> = {
     usage: "connect [--test] [--app-url <url>]",
     summary: "Check the key; register the app URL; --test: can the cloud reach your app?",
     run: (args, env) => connectCommand(args, { env }),
+  },
+  doctor: {
+    usage: "doctor",
+    summary: "Check the whole setup (env, key, DB, bundle, proxy, pages, cloud → app)",
+    run: (args, env) => doctorCommand(args, { env }),
   },
   aggregate: {
     usage: "aggregate [--upload]",
