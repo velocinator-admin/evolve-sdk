@@ -1,18 +1,27 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
+  type AggregateRequest,
+  type AggregateResponse,
+  aggregateRequestSchema,
+  aggregateResponseSchema,
   BUNDLE_TTL_SECONDS,
   BUNDLE_TYP,
   type BundlePayload,
   computeBundleHash,
   type Manifest,
   manifestSchema,
+  newRequestId,
   PROTOCOL_VERSION,
   parseSecretKey,
   type RegionRegistration,
   regionRegistrationSchema,
+  SIGNATURE_HEADER,
+  signBody,
+  verifyBody,
 } from "@next-evolve/protocol";
 import { signJws, type TestKeyPair } from "@next-evolve/protocol/testing";
-import { TEST_KEY } from "./keys";
+import { TEST_KEY, TEST_SITE, TEST_WEBHOOK_SECRET } from "./keys";
 
 export * from "./keys";
 
@@ -26,6 +35,27 @@ export type PublishInput = Pick<BundlePayload, "site" | "routing" | "variants"> 
 
 export type RecordedCall = { method: string; path: string; status: number; at: number };
 
+/** What a test asks the fake cloud to send; it fills type, pv, requestId and site. */
+export type AggregateInput = Partial<AggregateRequest> &
+  Pick<AggregateRequest, "experiments"> & { asOf?: string };
+
+/** One aggregate request the fake cloud sent to an app, and what came back. */
+export type AggregateExchange = {
+  request: AggregateRequest;
+  status: number;
+  /** True when the response carried a valid signature and matched the schema and request. */
+  verified: boolean;
+  response: AggregateResponse | null;
+  body: unknown;
+};
+
+/** A CLI upload (`POST /v1/aggregates`). */
+export type AggregateUpload = {
+  site: string;
+  verified: boolean;
+  response: AggregateResponse | null;
+};
+
 export type FakeCloud = {
   url: string;
   key: TestKeyPair;
@@ -36,6 +66,16 @@ export type FakeCloud = {
   manifests: Map<string, Manifest>;
   /** Regions per site, keyed by region id (POST /v1/regions). */
   regions: Map<string, Map<string, RegionRegistration>>;
+  /** Signs `input` with the site's webhook secret and POSTs it to `<appUrl>/api/evolve/aggregate`. */
+  aggregate(
+    appUrl: string,
+    input: AggregateInput,
+    opts?: { site?: string },
+  ): Promise<AggregateExchange>;
+  aggregates: AggregateExchange[];
+  /** The next request handed to `next-evolve aggregate` (`POST /v1/aggregates/request`), per site. */
+  setAggregateRequest(site: string, input: AggregateInput): void;
+  uploads: AggregateUpload[];
   close(): Promise<void>;
 };
 
@@ -46,11 +86,85 @@ type Stored = { token: string; payload: BundlePayload };
  * - `GET /v1/bundle` (bearer secret key, ETag `"<ver>.<iat>"`, 304 on match)
  * - `POST /__control/publish` (JSON {@link PublishInput}) → signed bundle
  * - `GET /__control/state` → recorded calls
+ * - `POST /__control/aggregate` ({ appUrl, site?, request }) → signed aggregate request to the app
+ * - `POST /__control/aggregate-request` ({ site?, request }) → what `/v1/aggregates/request` returns
+ * - `POST /v1/aggregates/request`, `POST /v1/aggregates` (CLI: fetch a request, upload its signed response)
  */
 export async function startFakeCloud(
-  opts: { port?: number; key?: TestKeyPair } = {},
+  opts: { port?: number; key?: TestKeyPair; webhookSecrets?: Record<string, string> } = {},
 ): Promise<FakeCloud> {
   const key = opts.key ?? TEST_KEY;
+  const secrets: Record<string, string> = {
+    [TEST_SITE]: TEST_WEBHOOK_SECRET,
+    ...opts.webhookSecrets,
+  };
+  const secretFor = (site: string) => secrets[site] ?? TEST_WEBHOOK_SECRET;
+  const aggregates: AggregateExchange[] = [];
+  const uploads: AggregateUpload[] = [];
+  const pendingRequests = new Map<string, AggregateInput>();
+
+  const fill = (site: string, input: AggregateInput): AggregateRequest =>
+    aggregateRequestSchema.parse({
+      type: "aggregate.request",
+      pv: PROTOCOL_VERSION,
+      requestId: newRequestId(),
+      site,
+      asOf: new Date(Date.now() - 120_000).toISOString(),
+      mode: "incremental",
+      usageFrom: null,
+      ...input,
+    }) as AggregateRequest;
+
+  /** The response, if it's signed with the site's secret, valid, and answers `req`. */
+  function checkResponse(
+    site: string,
+    text: string,
+    signature: string | null,
+    req?: AggregateRequest,
+  ): AggregateResponse | null {
+    if (!verifyBody(signature, text, secretFor(site)).ok) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    const r = aggregateResponseSchema.safeParse(parsed);
+    if (!r.success || r.data.site !== site) return null;
+    if (req && (r.data.requestId !== req.requestId || r.data.asOf !== req.asOf)) return null;
+    return r.data as AggregateResponse;
+  }
+
+  async function aggregate(
+    appUrl: string,
+    input: AggregateInput,
+    o: { site?: string } = {},
+  ): Promise<AggregateExchange> {
+    const site = o.site ?? TEST_SITE;
+    const request = fill(site, input);
+    const text = JSON.stringify(request);
+    const res = await fetch(new URL("/api/evolve/aggregate", appUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [SIGNATURE_HEADER]: signBody(secretFor(site), text),
+        "evolve-delivery": randomUUID(),
+      },
+      body: text,
+    });
+    const out = await res.text();
+    let body: unknown = out;
+    try {
+      body = JSON.parse(out);
+    } catch {}
+    const response =
+      res.status === 200
+        ? checkResponse(site, out, res.headers.get(SIGNATURE_HEADER), request)
+        : null;
+    const exchange = { request, status: res.status, verified: response !== null, response, body };
+    aggregates.push(exchange);
+    return exchange;
+  }
   const bundles = new Map<string, Stored>();
   const calls: RecordedCall[] = [];
   const manifests = new Map<string, Manifest>();
@@ -118,6 +232,47 @@ export async function startFakeCloud(
       return send(204);
     }
 
+    if (req.method === "POST" && url.pathname === "/v1/aggregates/request") {
+      if (!site) return send(401, { error: "invalid_key" });
+      const input = pendingRequests.get(site);
+      if (!input) return send(404, { error: "nothing_to_aggregate" });
+      return send(200, { request: fill(site, input) });
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/aggregates") {
+      if (!site) return send(401, { error: "invalid_key" });
+      const text = await readBody(req);
+      const response = checkResponse(site, text, header(req, SIGNATURE_HEADER));
+      uploads.push({ site, verified: response !== null, response });
+      if (!response) return send(400, { error: "invalid_response" });
+      return send(200, { ok: true, rows: response.rows.length });
+    }
+
+    if (req.method === "POST" && url.pathname === "/__control/aggregate") {
+      try {
+        const b = JSON.parse(await readBody(req)) as {
+          appUrl: string;
+          site?: string;
+          request: AggregateInput;
+        };
+        return send(200, await aggregate(b.appUrl, b.request, { site: b.site }));
+      } catch (e) {
+        return send(400, { error: String(e) });
+      }
+    }
+
+    if (req.method === "POST" && url.pathname === "/__control/aggregate-request") {
+      try {
+        const b = JSON.parse(await readBody(req)) as { site?: string; request: AggregateInput };
+        const s = b.site ?? TEST_SITE;
+        fill(s, b.request); // validate now
+        pendingRequests.set(s, b.request);
+        return send(204);
+      } catch (e) {
+        return send(400, { error: String(e) });
+      }
+    }
+
     if (req.method === "GET" && url.pathname === "/v1/bundle") {
       if (!site) return send(401, { error: "invalid_key" });
       const stored = bundles.get(site);
@@ -142,6 +297,8 @@ export async function startFakeCloud(
         sites: [...bundles.keys()],
         manifests: Object.fromEntries(manifests),
         regions: Object.fromEntries([...regions].map(([k, v]) => [k, Object.fromEntries(v)])),
+        aggregates,
+        uploads,
       });
     }
 
@@ -164,12 +321,24 @@ export async function startFakeCloud(
     calls,
     manifests,
     regions,
+    aggregate,
+    aggregates,
+    setAggregateRequest: (site, input) => {
+      fill(site, input);
+      pendingRequests.set(site, input);
+    },
+    uploads,
     close: () =>
       new Promise((resolve, reject) => {
         server.closeAllConnections();
         server.close((e) => (e ? reject(e) : resolve()));
       }),
   };
+}
+
+function header(req: IncomingMessage, name: string): string | null {
+  const v = req.headers[name];
+  return Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
 }
 
 function readBody(req: IncomingMessage): Promise<string> {

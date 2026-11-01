@@ -1,10 +1,15 @@
-import { TEST_PUBLIC_KEY_ENV, TEST_SECRET_KEY, TEST_SITE } from "@next-evolve/fake-cloud";
+import {
+  TEST_PUBLIC_KEY_ENV,
+  TEST_SECRET_KEY,
+  TEST_SITE,
+  TEST_WEBHOOK_SECRET,
+} from "@next-evolve/fake-cloud";
 
 export const CLOUD_PORT = 4010;
 export const APP_PORT = 3100;
 export const CLOUD_URL = `http://127.0.0.1:${CLOUD_PORT}`;
 export const APP_URL = `http://localhost:${APP_PORT}`;
-export { TEST_SITE };
+export { TEST_SECRET_KEY, TEST_SITE, TEST_WEBHOOK_SECRET };
 
 export const HUMAN_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
@@ -20,6 +25,7 @@ export const appEnv = {
   EVOLVE_TRACK_SECRET: TRACK_SECRET,
   EVOLVE_CLOUD_URL: CLOUD_URL,
   EVOLVE_SECRET_KEY: TEST_SECRET_KEY,
+  EVOLVE_WEBHOOK_SECRET: TEST_WEBHOOK_SECRET,
   EVOLVE_UNSAFE_TEST_PUBLIC_KEY: TEST_PUBLIC_KEY_ENV,
   // `next start` runs with NODE_ENV=production; allow the test key explicitly.
   EVOLVE_UNSAFE_ALLOW_TEST_KEY: "1",
