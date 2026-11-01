@@ -2,12 +2,13 @@ name: Release
 
 # Changesets: on main, either opens a "Version packages" PR or, once that PR is
 # merged, publishes next-evolve and @next-evolve/protocol to npm.
-# Auth: NPM_TOKEN (npm automation token) in Actions secrets. Trusted publishing
-# (OIDC) also works from a private repo once configured on npmjs.com; the
-# id-token permission below is there for it. Provenance stays off while the
+# Auth: npm trusted publishing (OIDC), configured on npmjs.com for both
+# packages (velocinator-admin/evolve-sdk, release.yml). No npm token. It needs
+# npm >= 11.5 (pnpm publish shells out to npm). Provenance stays off while the
 # repo is private.
-# Pushes to main publish only once the repo variable RELEASE_ENABLED is "true"
-# (set it when NPM_TOKEN or trusted publishing is ready, before T12.8).
+# The Version PR step can't open PRs (repo setting), so version locally with
+# `pnpm changeset version`, commit to main, and this workflow publishes.
+# Pushes to main publish only while the repo variable RELEASE_ENABLED is "true".
 
 on:
   push:
@@ -38,16 +39,25 @@ jobs:
           node-version: 22
           cache: pnpm
           registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@11.21.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm build --filter='./packages/*'
 
       - name: Dry-run publish
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
         run: |
-          npm whoami # fails on a missing or bad NPM_TOKEN
+          # Trusted publishing check: the OIDC exchange returns a publish token
+          # only if npmjs.com trusts this repo + workflow for the package.
+          oidc=$(curl -sf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)
+          for pkg in next-evolve @next-evolve%2fprotocol; do
+            curl -sf -X POST -H "Authorization: Bearer $oidc" \
+              "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/$pkg" \
+              | jq -e '.token | length > 0' >/dev/null \
+              || { echo "trusted publishing NOT set up for $pkg"; exit 1; }
+            echo "trusted publishing ok: $pkg"
+          done
           pnpm -r --filter='./packages/*' publish --dry-run --no-git-checks --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Version PR or publish
         if: github.event_name == 'push' || !inputs.dry_run
@@ -57,5 +67,4 @@ jobs:
           version: pnpm changeset version
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: false
