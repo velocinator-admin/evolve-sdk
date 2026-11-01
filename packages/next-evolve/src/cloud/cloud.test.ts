@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   type FakeCloud,
   startFakeCloud,
@@ -9,6 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { defineConfig } from "../config/config";
 import { defineGoals } from "../config/goals";
 import { registerEvolve, resetRegisterEvolve } from "../instrumentation";
+import { resetBundleStores } from "../store/runtime";
 import { buildManifest, detectAppUrl } from "./manifest";
 import { pushToCloud } from "./push";
 import { registerRegion, resetRegionRegistry } from "./regions";
@@ -60,6 +64,29 @@ describe("manifest", () => {
     await registerEvolve({ config, goals });
     expect(cloud.manifests.get(TEST_SITE)?.goals.signup).toMatchObject({ event: "signup" });
     expect(cloud.calls.filter((c) => c.path === "/v1/manifest")).toHaveLength(1);
+  });
+
+  it("registerEvolve polls the bundle on an interval on long-running Node, not on Vercel", async () => {
+    vi.stubEnv("EVOLVE_CACHE_DIR", mkdtempSync(join(tmpdir(), "evolve-poll-")));
+    const fast = defineConfig({ ...config, sync: { pollSeconds: 0.05 } });
+    const count = () => cloud.calls.filter((c) => c.path === "/v1/bundle").length;
+    resetBundleStores();
+    let before = count();
+    await registerEvolve({ config: fast, goals });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(count() - before).toBeGreaterThanOrEqual(3);
+    resetRegisterEvolve(); // stops the interval
+    before = count();
+    await new Promise((r) => setTimeout(r, 150));
+    expect(count() - before).toBeLessThanOrEqual(1);
+
+    vi.stubEnv("VERCEL", "1");
+    resetBundleStores();
+    before = count();
+    await registerEvolve({ config: fast, goals });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(count() - before).toBe(0);
+    vi.stubEnv("VERCEL", "");
   });
 });
 

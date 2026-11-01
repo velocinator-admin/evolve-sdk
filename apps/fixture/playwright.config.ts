@@ -48,14 +48,14 @@ export default defineConfig({
     },
     {
       // Variant ids are reused across test runs with different props; drop runtime ISR entries.
-      command: `rm -rf .next/server/route-cache && pnpm exec next start --port ${APP_PORT}`,
+      command: `rm -rf .next/server/route-cache .evolve-cache/main && mkdir -p .evolve-cache/main && pnpm exec next start --port ${APP_PORT}`,
       url: APP_URL,
       env: appEnv,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
     {
-      command: `pnpm exec next start --port ${SYNC_APP_PORT}`,
+      command: `rm -rf .evolve-cache/sync && mkdir -p .evolve-cache/sync && pnpm exec next start --port ${SYNC_APP_PORT}`,
       url: SYNC_APP_URL,
       env: syncAppEnv,
       reuseExistingServer: !process.env.CI,

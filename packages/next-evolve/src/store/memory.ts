@@ -27,6 +27,8 @@ export type MemoryStoreOptions = {
   initialToken?: string | null;
   now?: () => number;
   random?: () => number;
+  /** Called with each token accepted after creation (persistence). */
+  onAccept?: (token: string) => void;
 };
 
 /**
@@ -46,6 +48,7 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
     nextCheck = now() + opts.pollMs * (0.9 + 0.2 * random());
   };
 
+  let ready = false;
   function load(token: string): boolean {
     const r = verifyBundle(token, {
       keys: opts.keys,
@@ -61,6 +64,7 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
     current = r.payload;
     currentToken = token;
     etag = `"${r.payload.ver}.${r.payload.iat}"`;
+    if (ready) opts.onAccept?.(token);
     return true;
   }
 
@@ -84,6 +88,7 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
   }
 
   if (opts.initialToken) load(opts.initialToken);
+  ready = true;
 
   return {
     peek(waitUntil) {

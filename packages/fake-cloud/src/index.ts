@@ -34,7 +34,14 @@ export type PublishInput = Pick<BundlePayload, "site" | "routing" | "variants"> 
   exp?: number;
 };
 
-export type RecordedCall = { method: string; path: string; status: number; at: number };
+export type RecordedCall = {
+  method: string;
+  path: string;
+  status: number;
+  at: number;
+  /** Site of the bearer key, when there was one. */
+  site?: string;
+};
 
 /** What a test asks the fake cloud to send; it fills type, pv, requestId and site. */
 export type AggregateInput = Partial<AggregateRequest> &
@@ -258,8 +265,16 @@ export async function startFakeCloud(
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://fake");
+    const auth = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
+    const site = auth ? parseSecretKey(auth[1]!)?.siteId : undefined;
     const send = (status: number, body?: unknown, headers: Record<string, string> = {}) => {
-      calls.push({ method: req.method ?? "GET", path: url.pathname, status, at: Date.now() });
+      calls.push({
+        method: req.method ?? "GET",
+        path: url.pathname,
+        status,
+        at: Date.now(),
+        ...(site ? { site } : {}),
+      });
       const isText = typeof body === "string";
       res.writeHead(status, {
         ...(body === undefined
@@ -271,9 +286,6 @@ export async function startFakeCloud(
     };
 
     if (req.method === "GET" && url.pathname === "/health") return send(200, { ok: true });
-
-    const auth = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
-    const site = auth ? parseSecretKey(auth[1]!)?.siteId : undefined;
 
     if (
       req.method === "POST" &&

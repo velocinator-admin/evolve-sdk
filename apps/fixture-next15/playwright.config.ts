@@ -17,7 +17,8 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: "rm -rf .next/cache/fetch-cache && pnpm exec next start --port 3115",
+      command:
+        "rm -rf .next/cache/fetch-cache .evolve-cache && mkdir -p .evolve-cache && pnpm exec next start --port 3115",
       url: "http://localhost:3115/login",
       env: {
         EVOLVE_CLOUD_URL: CLOUD,
@@ -25,6 +26,7 @@ export default defineConfig({
         EVOLVE_UNSAFE_TEST_PUBLIC_KEY: TEST_PUBLIC_KEY_ENV,
         EVOLVE_UNSAFE_ALLOW_TEST_KEY: "1",
         EVOLVE_POLL_SECONDS: "1",
+        EVOLVE_CACHE_DIR: ".evolve-cache",
       },
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,

@@ -38,12 +38,15 @@ export const appEnv = {
   // `next start` runs with NODE_ENV=production; allow the test key explicitly.
   EVOLVE_UNSAFE_ALLOW_TEST_KEY: "1",
   EVOLVE_POLL_SECONDS: "1",
+  // The fake cloud restarts at ver 1; a disk cache from an earlier run would look newer.
+  EVOLVE_CACHE_DIR: ".evolve-cache/main",
 };
 
 export const syncAppEnv = {
   ...appEnv,
   EVOLVE_SECRET_KEY: `evk_live_${SYNC_SITE}_${"S".repeat(32)}`,
   EVOLVE_POLL_SECONDS: "600",
+  EVOLVE_CACHE_DIR: ".evolve-cache/sync",
 };
 
 /** Hero test on "/" (A = control, B = new headline) and a pricing CTA test. */

@@ -1,5 +1,6 @@
 import { type KeyRing, parseSecretKey } from "@next-evolve/protocol";
 import { trustedKeys } from "../core/keys";
+import { defaultDiskDir, diskPath, readDisk, writeDisk } from "./disk";
 import { fetchBundle } from "./fetch";
 import { type BundleStore, createMemoryStore } from "./memory";
 
@@ -11,7 +12,14 @@ export type RuntimeOptions = {
   /** Inject a store (tests). */
   store?: BundleStore;
   env?: Env;
+  /** Disk cache directory on long-running Node (default: $EVOLVE_CACHE_DIR, else os.tmpdir()). */
+  diskDir?: string;
 };
+
+/** True off serverless hosts: a process that lives across requests (next start, Docker). */
+export function isLongRunningNode(env: Env = process.env): boolean {
+  return !env.VERCEL && !env.AWS_LAMBDA_FUNCTION_NAME && !env.NETLIFY;
+}
 
 /** Default cloud URL (decision D29). Override with EVOLVE_CLOUD_URL. */
 export const DEFAULT_CLOUD_URL: string | undefined = "https://api.evolveab.com";
@@ -46,13 +54,22 @@ export function getBundleStore(
     return existing;
   }
   const cloudUrl = env.EVOLVE_CLOUD_URL ?? DEFAULT_CLOUD_URL;
+  const disk = isLongRunningNode(env)
+    ? diskPath(opts.diskDir ?? env.EVOLVE_CACHE_DIR ?? defaultDiskDir(), site)
+    : null;
   const store = createMemoryStore({
     site,
     keys: trustedKeys(env),
     pollMs: (config.pollSeconds ?? (env.NODE_ENV === "production" ? 60 : 5)) * 1000,
     initialToken: opts.buildBundle ?? null,
     fetcher: cloudUrl ? (etag) => fetchBundle({ cloudUrl, secretKey, etag }) : undefined,
+    ...(disk ? { onAccept: (token: string) => writeDisk(disk, token) } : {}),
   });
+  if (disk) {
+    // Cold start: build bundle first, then the disk copy if it's newer.
+    const cached = readDisk(disk);
+    if (cached && cached !== store.token()) store.load(cached);
+  }
   reg.set(site, store);
   return store;
 }

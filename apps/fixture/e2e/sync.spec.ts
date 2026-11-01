@@ -63,9 +63,9 @@ test("forged and replayed webhooks don't cause a bundle fetch", async ({ request
   const fetches = async () =>
     (
       (await (await request.get(`${CLOUD_URL}/__control/state`)).json()) as {
-        calls: { path: string }[];
+        calls: { path: string; site?: string }[];
       }
-    ).calls.filter((c) => c.path === "/v1/bundle").length;
+    ).calls.filter((c) => c.path === "/v1/bundle" && c.site === SYNC_SITE).length;
   const send = (data: object) =>
     request.post(`${CLOUD_URL}/__control/webhook`, {
       data: { appUrl: SYNC_APP_URL, site: SYNC_SITE, ...data },
