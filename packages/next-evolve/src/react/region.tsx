@@ -1,9 +1,11 @@
 import { type BundlePayload, CONTROL_CODE, type CodePair, decodeCode } from "@next-evolve/protocol";
 import { headers } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
+import { after } from "next/server";
 import { createElement, type ReactElement } from "react";
 import type { z } from "zod";
-import { HEADER_CODE } from "../core/constants";
+import { registerRegion } from "../cloud/regions";
+import { HEADER_CODE, HEADER_PATH } from "../core/constants";
 import { logRateLimited } from "../core/log";
 import { requestContext } from "./context";
 import { getOptimizableMeta, type OptimizableComponent } from "./optimizable";
@@ -34,6 +36,41 @@ async function currentCode(): Promise<string | null> {
   } catch (e) {
     unstable_rethrow(e);
     return null;
+  }
+}
+
+/** The page path this region renders on (static: withEvolve; dynamic: the proxy header). */
+async function currentPath(): Promise<string | null> {
+  const ctx = requestContext();
+  if (ctx.path) return ctx.path;
+  try {
+    return (await headers()).get(HEADER_PATH);
+  } catch (e) {
+    unstable_rethrow(e);
+    return null;
+  }
+}
+
+/** Region registration (spec §5.2): after the response, deduped per process, errors swallowed. */
+function scheduleRegistration(
+  id: string,
+  meta: { jsonSchema: Record<string, unknown>; schemaHash: string },
+  controlProps: Record<string, unknown>,
+  path: string | null,
+): void {
+  if (!path) return;
+  try {
+    after(() =>
+      registerRegion({
+        id,
+        jsonSchema: meta.jsonSchema,
+        schemaHash: meta.schemaHash,
+        controlProps,
+        path,
+      }),
+    );
+  } catch {
+    // Outside a request scope (tests, some build steps): skip; a later render registers it.
   }
 }
 
@@ -76,6 +113,12 @@ export async function Optimizable<P extends object, S extends z.ZodObject>({
   const control = () => createElement(component, controlProps);
 
   const code = await currentCode();
+  scheduleRegistration(
+    id,
+    meta,
+    parsedControl.success ? (parsedControl.data as Record<string, unknown>) : editableOf(props),
+    await currentPath(),
+  );
   if (!code) {
     if (!warnedNoContext && process.env.NODE_ENV !== "production") {
       warnedNoContext = true;

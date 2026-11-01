@@ -4,8 +4,12 @@ import {
   BUNDLE_TYP,
   type BundlePayload,
   computeBundleHash,
+  type Manifest,
+  manifestSchema,
   PROTOCOL_VERSION,
   parseSecretKey,
+  type RegionRegistration,
+  regionRegistrationSchema,
 } from "@next-evolve/protocol";
 import { signJws, type TestKeyPair } from "@next-evolve/protocol/testing";
 import { TEST_KEY } from "./keys";
@@ -28,6 +32,10 @@ export type FakeCloud = {
   /** Signs and stores a bundle for `input.site`. Returns the signed token and payload. */
   publish(input: PublishInput): { token: string; payload: BundlePayload };
   calls: RecordedCall[];
+  /** Last manifest per site (POST /v1/manifest). */
+  manifests: Map<string, Manifest>;
+  /** Regions per site, keyed by region id (POST /v1/regions). */
+  regions: Map<string, Map<string, RegionRegistration>>;
   close(): Promise<void>;
 };
 
@@ -45,6 +53,8 @@ export async function startFakeCloud(
   const key = opts.key ?? TEST_KEY;
   const bundles = new Map<string, Stored>();
   const calls: RecordedCall[] = [];
+  const manifests = new Map<string, Manifest>();
+  const regions = new Map<string, Map<string, RegionRegistration>>();
 
   function publish(input: PublishInput): Stored {
     const prev = bundles.get(input.site)?.payload;
@@ -80,9 +90,35 @@ export async function startFakeCloud(
 
     if (req.method === "GET" && url.pathname === "/health") return send(200, { ok: true });
 
+    const auth = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
+    const site = auth ? parseSecretKey(auth[1]!)?.siteId : undefined;
+
+    if (
+      req.method === "POST" &&
+      (url.pathname === "/v1/manifest" || url.pathname === "/v1/regions")
+    ) {
+      if (!site) return send(401, { error: "invalid_key" });
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req));
+      } catch {
+        return send(400, { error: "invalid_json" });
+      }
+      if (url.pathname === "/v1/manifest") {
+        const m = manifestSchema.safeParse(body);
+        if (!m.success) return send(400, { error: "invalid_manifest" });
+        manifests.set(site, m.data);
+      } else {
+        const r = regionRegistrationSchema.safeParse(body);
+        if (!r.success) return send(400, { error: "invalid_region" });
+        const siteRegions = regions.get(site) ?? new Map<string, RegionRegistration>();
+        siteRegions.set(r.data.id, r.data);
+        regions.set(site, siteRegions);
+      }
+      return send(204);
+    }
+
     if (req.method === "GET" && url.pathname === "/v1/bundle") {
-      const auth = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
-      const site = auth ? parseSecretKey(auth[1]!)?.siteId : undefined;
       if (!site) return send(401, { error: "invalid_key" });
       const stored = bundles.get(site);
       if (!stored) return send(404, { error: "no_bundle" });
@@ -101,7 +137,12 @@ export async function startFakeCloud(
     }
 
     if (req.method === "GET" && url.pathname === "/__control/state") {
-      return send(200, { calls, sites: [...bundles.keys()] });
+      return send(200, {
+        calls,
+        sites: [...bundles.keys()],
+        manifests: Object.fromEntries(manifests),
+        regions: Object.fromEntries([...regions].map(([k, v]) => [k, Object.fromEntries(v)])),
+      });
     }
 
     send(404, { error: "not_found" });
@@ -121,6 +162,8 @@ export async function startFakeCloud(
     key,
     publish,
     calls,
+    manifests,
+    regions,
     close: () =>
       new Promise((resolve, reject) => {
         server.closeAllConnections();
