@@ -43,7 +43,7 @@ describe("ids", () => {
     }
     // Expected ≈ n²/2N ≈ 230; a biased generator would be far above.
     expect(dupes).toBeLessThan(400);
-  });
+  }, 30_000); // 1e6 draws: ~5 s on CI runners
 
   it("generates 1e6 unique anon ids", () => {
     const seen = new Set<string>();

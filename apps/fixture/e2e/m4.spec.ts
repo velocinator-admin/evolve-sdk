@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { sql } from "./db";
-import { APP_URL, CLOUD_URL } from "./env";
+import postgres from "postgres";
+import { APP_URL, CLOUD_URL, DB_URL } from "./env";
 
 // M4: the (fake) cloud sends a signed aggregate request; the fixture computes
 // sufficient statistics in its own Postgres and answers, signed.
@@ -10,6 +10,8 @@ const A = "m4va01";
 const B = "m4vb01";
 
 test.describe.configure({ mode: "serial" });
+// Its own pool: e2e/db.ts's shared one is closed by other specs in the same worker.
+const sql = postgres(DB_URL, { max: 1, onnotice: () => {} });
 test.afterAll(() => sql.end());
 
 const goal = (key: string, def: Record<string, unknown>) => ({
