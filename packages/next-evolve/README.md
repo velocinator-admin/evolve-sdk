@@ -81,3 +81,14 @@ if (event.type === "invoice.paid") {
   });
 }
 ```
+
+## Aggregation
+
+Evolve Cloud never reads your database. It sends a signed request to `POST /api/evolve/aggregate` (verified with `EVOLVE_WEBHOOK_SECRET`), and your app answers with counts and sums per experiment × variant × goal × day, signed with the same secret. No visitor or user ids leave your app. Set `EVOLVE_SECRET_KEY`, `EVOLVE_WEBHOOK_SECRET` and `EVOLVE_DATABASE_URL`; the route needs `maxDuration = 60`.
+
+In local development the cloud can't reach `localhost`. Run the same request yourself:
+
+```sh
+npx next-evolve aggregate           # print the statistics
+npx next-evolve aggregate --upload  # and send them to Evolve Cloud
+```

@@ -1,14 +1,18 @@
 #!/usr/bin/env node
-// `npx next-evolve <command>`. Minimal until the full CLI (E11): `migrate` only.
+// `npx next-evolve <command>`. Minimal until the full CLI (E11): `migrate`, `aggregate`.
 import { existsSync } from "node:fs";
 import { createSql } from "../db/client";
 import { migrate } from "../db/migrate";
+import { aggregateCommand } from "./aggregate";
 
 const HELP = `Usage: next-evolve <command>
 
 Commands:
   migrate [--url <postgres-url>]   Create or update the evolve schema in your database
                                    (default: $EVOLVE_DATABASE_URL, read from .env.local / .env)
+  aggregate [--upload]             Run the cloud's aggregate request on your local database and
+                                   print the statistics; --upload sends them to Evolve Cloud
+                                   (for local dev, where the cloud can't reach your app)
 `;
 
 function loadEnvFiles() {
@@ -44,7 +48,10 @@ async function runMigrate(args: string[]): Promise<number> {
 
 const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === "migrate") process.exitCode = await runMigrate(rest);
-else {
+else if (cmd === "aggregate") {
+  loadEnvFiles();
+  process.exitCode = await aggregateCommand(rest, { env: process.env });
+} else {
   process.stdout.write(HELP);
   process.exitCode = cmd && cmd !== "help" && cmd !== "--help" ? 1 : 0;
 }
