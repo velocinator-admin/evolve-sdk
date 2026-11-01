@@ -9,6 +9,7 @@ import { getBundleStore } from "../store/runtime";
 import { handleAggregate } from "./aggregate-route";
 import { handleCollect } from "./collect";
 import { runtimeWriter, scheduleFlush, setRuntime } from "./runtime";
+import { handleSync } from "./sync-route";
 import { handleTrack } from "./track-route";
 
 export type EvolveHandlerOptions = {
@@ -22,7 +23,8 @@ const notFound = () => Response.json({ error: "not_found" }, { status: 404 });
 /**
  * Route handlers for `app/api/evolve/[...evolve]/route.ts`:
  * `POST collect` (beacon), `POST track` (bearer webhook), `POST aggregate`
- * (signed cloud request), `GET health`. Sync arrives with T7.5.
+ * (signed cloud request), `POST sync` (signed cloud webhook → pull the
+ * bundle), `GET health`.
  */
 export function createEvolveHandler(opts: EvolveHandlerOptions) {
   const cfg = resolveConfig(opts.config);
@@ -57,6 +59,11 @@ export function createEvolveHandler(opts: EvolveHandlerOptions) {
             secret: env().EVOLVE_TRACK_SECRET,
             goals: opts.goals,
             writer: runtimeWriter(),
+          });
+        case "sync":
+          return await handleSync(req, {
+            env: env(),
+            store: () => getBundleStore(cfg, { env: env() }),
           });
         case "aggregate":
           return await handleAggregate(req, {

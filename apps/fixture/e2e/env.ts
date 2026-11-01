@@ -9,6 +9,14 @@ export const CLOUD_PORT = 4010;
 export const APP_PORT = 3100;
 export const CLOUD_URL = `http://127.0.0.1:${CLOUD_PORT}`;
 export const APP_URL = `http://localhost:${APP_PORT}`;
+
+/**
+ * A second instance of the fixture for another site that polls every 10 min,
+ * so only the sync webhook can bring it a new bundle quickly (T7.9).
+ */
+export const SYNC_APP_PORT = 3101;
+export const SYNC_APP_URL = `http://localhost:${SYNC_APP_PORT}`;
+export const SYNC_SITE = "site_fakesync01";
 export { TEST_SECRET_KEY, TEST_SITE, TEST_WEBHOOK_SECRET };
 
 export const HUMAN_UA =
@@ -30,6 +38,12 @@ export const appEnv = {
   // `next start` runs with NODE_ENV=production; allow the test key explicitly.
   EVOLVE_UNSAFE_ALLOW_TEST_KEY: "1",
   EVOLVE_POLL_SECONDS: "1",
+};
+
+export const syncAppEnv = {
+  ...appEnv,
+  EVOLVE_SECRET_KEY: `evk_live_${SYNC_SITE}_${"S".repeat(32)}`,
+  EVOLVE_POLL_SECONDS: "600",
 };
 
 /** Hero test on "/" (A = control, B = new headline) and a pricing CTA test. */

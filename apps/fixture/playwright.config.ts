@@ -1,5 +1,15 @@
 import { defineConfig } from "@playwright/test";
-import { APP_PORT, APP_URL, appEnv, CLOUD_PORT, CLOUD_URL, HUMAN_UA } from "./e2e/env";
+import {
+  APP_PORT,
+  APP_URL,
+  appEnv,
+  CLOUD_PORT,
+  CLOUD_URL,
+  HUMAN_UA,
+  SYNC_APP_PORT,
+  SYNC_APP_URL,
+  syncAppEnv,
+} from "./e2e/env";
 
 export default defineConfig({
   testDir: "e2e",
@@ -41,6 +51,13 @@ export default defineConfig({
       command: `rm -rf .next/server/route-cache && pnpm exec next start --port ${APP_PORT}`,
       url: APP_URL,
       env: appEnv,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      command: `pnpm exec next start --port ${SYNC_APP_PORT}`,
+      url: SYNC_APP_URL,
+      env: syncAppEnv,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },

@@ -12,6 +12,8 @@ export type BundleStore = {
   load(token: string): boolean;
   /** Fetches now (one in flight). Resolves once done. */
   refresh(): Promise<void>;
+  /** The current bundle without side effects (no refresh; expiry not applied). */
+  current(): BundlePayload | null;
   /** Raw token of the current bundle (for persistence). */
   token(): string | null;
 };
@@ -97,6 +99,7 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
     },
     load,
     refresh,
+    current: () => current,
     token: () => currentToken,
   };
 }

@@ -138,6 +138,7 @@ describe("proxy (static mode)", () => {
       },
       load: () => false,
       refresh: async () => {},
+      current: () => null,
       token: () => null,
     };
     expect(rewritten(run(request("/"), broken))).toBe("/ev_0");
