@@ -115,7 +115,7 @@ function throttledRefresh(store: BundleStore, deps: SyncDeps): Promise<void> {
     t.waiting = null; // later calls start a new window
     t.last = now();
     const before = store.token();
-    await store.refresh();
+    await store.refresh({ force: true });
     const after = store.token();
     if (after && after !== before) await (deps.onSynced ?? revalidateBundle)(after);
   };

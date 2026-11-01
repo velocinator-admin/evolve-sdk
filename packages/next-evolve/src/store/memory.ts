@@ -10,8 +10,11 @@ export type BundleStore = {
   peek(waitUntil?: (p: Promise<unknown>) => void): BundlePayload | null;
   /** Verifies and installs a token (build bundle, disk, sync route). Returns whether it was accepted. */
   load(token: string): boolean;
-  /** Fetches now (one in flight). Resolves once done. */
-  refresh(): Promise<void>;
+  /**
+   * Fetches now (one in flight). Resolves once done. `force`: a fetch already
+   * in flight may predate a publish, so wait for it and fetch again.
+   */
+  refresh(opts?: { force?: boolean }): Promise<void>;
   /** The current bundle without side effects (no refresh; expiry not applied). */
   current(): BundlePayload | null;
   /** Raw token of the current bundle (for persistence). */
@@ -68,9 +71,9 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
     return true;
   }
 
-  function refresh(): Promise<void> {
+  function refresh(o: { force?: boolean } = {}): Promise<void> {
     if (!opts.fetcher) return Promise.resolve();
-    if (inflight) return inflight;
+    if (inflight) return o.force ? inflight.then(() => refresh()) : inflight;
     schedule();
     inflight = opts
       .fetcher(etag)

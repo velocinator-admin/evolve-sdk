@@ -139,3 +139,19 @@ describe("memory bundle store", () => {
     expect(s.store.peek()?.ver).toBe(2);
   });
 });
+
+describe("refresh({ force })", () => {
+  it("waits for a fetch already in flight, then fetches again", async () => {
+    const s = setup();
+    const first = s.store.refresh();
+    const forced = s.store.refresh({ force: true });
+    expect(s.fetcher).toHaveBeenCalledTimes(1);
+    await s.reply({ status: "not_modified" });
+    await first;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.fetcher).toHaveBeenCalledTimes(2);
+    await s.reply({ status: "ok", token: token({ ver: 7 }), etag: null });
+    await forced;
+    expect(s.store.current()?.ver).toBe(7);
+  });
+});
