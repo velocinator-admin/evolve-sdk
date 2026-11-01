@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev --port 3100",
+    "prebuild": "next-evolve pull",
     "build": "next build",
     "start": "next start --port 3100",
     "typecheck": "next typegen && tsc --noEmit",

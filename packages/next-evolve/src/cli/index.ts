@@ -4,12 +4,15 @@ import { existsSync } from "node:fs";
 import { createSql } from "../db/client";
 import { migrate } from "../db/migrate";
 import { aggregateCommand } from "./aggregate";
+import { pullCommand } from "./pull";
 
 const HELP = `Usage: next-evolve <command>
 
 Commands:
   migrate [--url <postgres-url>]   Create or update the evolve schema in your database
                                    (default: $EVOLVE_DATABASE_URL, read from .env.local / .env)
+  pull                             Fetch and verify the current bundle into
+                                   .evolve/bundle.generated.ts (run as "prebuild"; never fails)
   aggregate [--upload]             Run the cloud's aggregate request on your local database and
                                    print the statistics; --upload sends them to Evolve Cloud
                                    (for local dev, where the cloud can't reach your app)
@@ -48,7 +51,10 @@ async function runMigrate(args: string[]): Promise<number> {
 
 const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === "migrate") process.exitCode = await runMigrate(rest);
-else if (cmd === "aggregate") {
+else if (cmd === "pull") {
+  loadEnvFiles();
+  process.exitCode = await pullCommand(rest, { env: process.env });
+} else if (cmd === "aggregate") {
   loadEnvFiles();
   process.exitCode = await aggregateCommand(rest, { env: process.env });
 } else {
