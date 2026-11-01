@@ -2,6 +2,14 @@ import { type KeyRing, parseSecretKey } from "@next-evolve/protocol";
 import { trustedKeys } from "../core/keys";
 import { defaultDiskDir, diskPath, readDisk, writeDisk } from "./disk";
 import { fetchBundle } from "./fetch";
+import {
+  COLD_READ_CAP_MS,
+  createGlobalConfigFetcher,
+  defaultReader,
+  GLOBAL_CONFIG_TTL_MS,
+  type GlobalConfigReader,
+  globalConfigSettings,
+} from "./global-config";
 import { type BundleStore, createMemoryStore } from "./memory";
 
 type Env = Record<string, string | undefined>;
@@ -12,6 +20,8 @@ export type RuntimeOptions = {
   /** Inject a store (tests). */
   store?: BundleStore;
   env?: Env;
+  /** Global Config reader (tests). */
+  globalConfigReader?: GlobalConfigReader;
   /** Disk cache directory on long-running Node (default: $EVOLVE_CACHE_DIR, else os.tmpdir()). */
   diskDir?: string;
 };
@@ -38,7 +48,7 @@ const registry = (): Registry => {
  * valid secret key (then everything serves control).
  */
 export function getBundleStore(
-  config: { pollSeconds?: number },
+  config: { pollSeconds?: number; store?: "auto" | "memory" | "global-config" },
   opts: RuntimeOptions = {},
 ): BundleStore | null {
   if (opts.store) return opts.store;
@@ -57,12 +67,24 @@ export function getBundleStore(
   const disk = isLongRunningNode(env)
     ? diskPath(opts.diskDir ?? env.EVOLVE_CACHE_DIR ?? defaultDiskDir(), site)
     : null;
+  const pollMs = (config.pollSeconds ?? (env.NODE_ENV === "production" ? 60 : 5)) * 1000;
+  const cloud = cloudUrl
+    ? (etag: string | null) => fetchBundle({ cloudUrl, secretKey, etag })
+    : undefined;
+  const gc = globalConfigSettings(config.store, env);
   const store = createMemoryStore({
     site,
     keys: trustedKeys(env),
-    pollMs: (config.pollSeconds ?? (env.NODE_ENV === "production" ? 60 : 5)) * 1000,
+    pollMs: gc ? Math.min(pollMs, GLOBAL_CONFIG_TTL_MS) : pollMs,
     initialToken: opts.buildBundle ?? null,
-    fetcher: cloudUrl ? (etag) => fetchBundle({ cloudUrl, secretKey, etag }) : undefined,
+    fetcher: gc
+      ? createGlobalConfigFetcher({
+          site,
+          read: opts.globalConfigReader ?? defaultReader(gc.connectionString),
+          cloud,
+          cloudEveryMs: pollMs,
+        })
+      : cloud,
     ...(disk ? { onAccept: (token: string) => writeDisk(disk, token) } : {}),
   });
   if (disk) {
@@ -71,7 +93,21 @@ export function getBundleStore(
     if (cached && cached !== store.token()) store.load(cached);
   }
   reg.set(site, store);
+  if (gc) coldReads.set(store, true);
   return store;
+}
+
+const coldReads = new WeakMap<BundleStore, boolean>();
+
+/**
+ * Global Config hosts, first request of an instance: a promise that resolves
+ * after one Global Config read or {@link COLD_READ_CAP_MS}, whichever comes
+ * first (spec §7.8). Null when there's nothing to wait for.
+ */
+export function coldStart(store: BundleStore): Promise<void> | null {
+  if (!coldReads.get(store)) return null;
+  coldReads.delete(store);
+  return Promise.race([store.refresh(), new Promise<void>((r) => setTimeout(r, COLD_READ_CAP_MS))]);
 }
 
 const identities = new Map<string, { site: string; keys: KeyRing } | null>();

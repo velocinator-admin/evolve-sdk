@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@next-evolve/protocol": "workspace:*",
+    "@vercel/global-config": "1.5.1",
     "isbot": "5.2.2",
     "postgres": "3.4.9",
     "server-only": "^0.0.1"

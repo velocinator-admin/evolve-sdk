@@ -1,15 +1,16 @@
-import { SUPPORTED_PROTOCOLS } from "@next-evolve/protocol";
+import { parseSecretKey, SUPPORTED_PROTOCOLS } from "@next-evolve/protocol";
 import { sdkVersion } from "../cloud/manifest";
 import { type EvolveConfig, resolveConfig } from "../config/config";
 import { type Goals, serializeGoals } from "../config/goals";
 import { createBotDetector } from "../core/bots";
 import { logRateLimited } from "../core/log";
 import { getSql } from "../db/client";
+import { globalConfigSettings, writeGlobalConfig } from "../store/global-config";
 import { getBundleStore } from "../store/runtime";
 import { handleAggregate } from "./aggregate-route";
 import { handleCollect } from "./collect";
 import { runtimeWriter, scheduleFlush, setRuntime } from "./runtime";
-import { handleSync } from "./sync-route";
+import { handleSync, revalidateBundle } from "./sync-route";
 import { handleTrack } from "./track-route";
 
 export type EvolveHandlerOptions = {
@@ -64,6 +65,12 @@ export function createEvolveHandler(opts: EvolveHandlerOptions) {
           return await handleSync(req, {
             env: env(),
             store: () => getBundleStore(cfg, { env: env() }),
+            onSynced: async (token) => {
+              const gc = globalConfigSettings(cfg.store, env());
+              const site = parseSecretKey(env().EVOLVE_SECRET_KEY ?? "")?.siteId;
+              if (gc && site) await writeGlobalConfig(gc, site, token);
+              await revalidateBundle();
+            },
           });
         case "aggregate":
           return await handleAggregate(req, {

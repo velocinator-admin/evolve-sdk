@@ -12,7 +12,7 @@ import {
   serializeAssignments,
 } from "../core/cookies";
 import { logRateLimited } from "../core/log";
-import { getBundleStore, getSiteIdentity, type RuntimeOptions } from "../store/runtime";
+import { coldStart, getBundleStore, getSiteIdentity, type RuntimeOptions } from "../store/runtime";
 
 export type EvolveProxyOptions = RuntimeOptions & {
   /** Random source in [0, 1) (tests). */
@@ -129,8 +129,27 @@ function passThrough(req: NextRequest, code: string, path: string): NextResponse
 
 /** Builds the `proxy` export for `proxy.ts` (Next 16) or `middleware.ts` (Next 15.5, Node runtime). */
 export function createEvolveProxy(config: EvolveConfig, opts: EvolveProxyOptions = {}) {
-  resolveConfig(config);
-  return function proxy(req: NextRequest, event: NextFetchEvent): NextResponse {
-    return applyEvolve(config, req, event, opts) ?? NextResponse.next();
+  resolveConfig(config); // throws on invalid config at startup
+  return function proxy(
+    req: NextRequest,
+    event: NextFetchEvent,
+  ): NextResponse | Promise<NextResponse> {
+    const ready = evolveReady(config, opts);
+    const run = () => applyEvolve(config, req, event, opts) ?? NextResponse.next();
+    return ready ? ready.then(run) : run();
   };
+}
+
+/**
+ * With Global Config, an instance's first request waits ≤ 20 ms for one read
+ * (spec §7.8). Returns null when there's nothing to wait for. With an existing
+ * proxy: `await evolveReady(config)` before `applyEvolve(...)`.
+ */
+export function evolveReady(config: EvolveConfig, opts: RuntimeOptions = {}): Promise<void> | null {
+  try {
+    const store = getBundleStore(resolveConfig(config), opts);
+    return store ? coldStart(store) : null;
+  } catch {
+    return null;
+  }
 }

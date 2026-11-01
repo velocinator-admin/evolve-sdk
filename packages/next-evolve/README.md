@@ -92,3 +92,35 @@ In local development the cloud can't reach `localhost`. Run the same request you
 npx next-evolve aggregate           # print the statistics
 npx next-evolve aggregate --upload  # and send them to Evolve Cloud
 ```
+
+## Sync
+
+Your app keeps a signed copy of its configuration (the bundle) in memory and serves from it with no network call on the request path. It gets new bundles three ways:
+
+- **Polling:** every 60 s (5 s in dev), in the background.
+- **Webhook:** when you change an experiment, Evolve Cloud calls `POST /api/evolve/sync` (signed with `EVOLVE_WEBHOOK_SECRET`). The receiving instance pulls the new bundle within seconds. The webhook carries no configuration, so a forged call can at most cause one extra fetch.
+- **Build time:** add `"prebuild": "next-evolve pull"` to `package.json` and pass the result to the proxy, so a fresh instance serves the last bundle before its first fetch:
+
+```ts
+// proxy.ts
+import { createEvolveProxy } from "next-evolve/proxy";
+import buildBundle from "./.evolve/bundle.generated";
+import evolveConfig from "./evolve.config";
+
+export const proxy = createEvolveProxy(evolveConfig, { buildBundle });
+```
+
+Add `.evolve/` to `.gitignore`. `pull` never fails the build: without a key or a reachable cloud it keeps the previous bundle or writes an empty one.
+
+**Long-running Node (`next start`, Docker):** call `registerEvolve()` from `instrumentation.ts`. It polls in the background and keeps the last bundle on disk (`os.tmpdir()`, or `EVOLVE_CACHE_DIR`), so a restart serves it even when the cloud is unreachable.
+
+**Vercel + Global Config (recommended on Vercel):** without it, a webhook reaches only the instance that receives it and the others catch up within 60 s. With a [Global Config](https://vercel.com/docs/edge-config) store, the sync route writes the bundle there and every instance picks it up within ~10 s. Set:
+
+| Var                       | Purpose                                 |
+| ------------------------- | --------------------------------------- |
+| `EVOLVE_GLOBAL_CONFIG`    | The store's connection string (read)    |
+| `EVOLVE_GLOBAL_CONFIG_ID` | The store id (`ecfg_…`), for writes     |
+| `EVOLVE_VERCEL_API_TOKEN` | A Vercel token that can write the store |
+| `EVOLVE_VERCEL_TEAM_ID`   | Optional, for team-owned stores         |
+
+Bundles read from Global Config are verified like any other. With an existing proxy that calls `applyEvolve`, `await evolveReady(evolveConfig)` first (a fresh instance waits ≤ 20 ms for one read).

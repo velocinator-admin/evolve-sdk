@@ -267,7 +267,7 @@ describe("matcher (the init-written config)", () => {
 describe("createEvolveProxy", () => {
   it("returns next() for other routes", () => {
     const proxy = createEvolveProxy(config, { store: storeWith() });
-    const res = proxy(request("/signup"), event as never);
+    const res = proxy(request("/signup"), event as never) as NextResponse;
     expect(res.headers.get("x-middleware-next")).toBe("1");
   });
 
