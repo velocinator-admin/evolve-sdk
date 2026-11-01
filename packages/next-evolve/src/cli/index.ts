@@ -1,22 +1,41 @@
 #!/usr/bin/env node
-// `npx next-evolve <command>`. Minimal until the full CLI (E11): `migrate`, `aggregate`.
+// `npx next-evolve <command>` (spec §16).
 import { existsSync } from "node:fs";
-import { createSql } from "../db/client";
-import { migrate } from "../db/migrate";
 import { aggregateCommand } from "./aggregate";
+import { migrateCommand } from "./migrate";
 import { pullCommand } from "./pull";
 
-const HELP = `Usage: next-evolve <command>
+type Env = Record<string, string | undefined>;
+type Command = {
+  usage: string;
+  summary: string;
+  run: (args: string[], env: Env) => Promise<number>;
+};
 
-Commands:
-  migrate [--url <postgres-url>]   Create or update the evolve schema in your database
-                                   (default: $EVOLVE_DATABASE_URL, read from .env.local / .env)
-  pull                             Fetch and verify the current bundle into
-                                   .evolve/bundle.generated.ts (run as "prebuild"; never fails)
-  aggregate [--upload]             Run the cloud's aggregate request on your local database and
-                                   print the statistics; --upload sends them to Evolve Cloud
-                                   (for local dev, where the cloud can't reach your app)
-`;
+const COMMANDS: Record<string, Command> = {
+  migrate: {
+    usage: "migrate [--url <postgres-url>]",
+    summary: "Create or update the evolve schema in your database ($EVOLVE_DATABASE_URL)",
+    run: (args, env) => migrateCommand(args, { env }),
+  },
+  pull: {
+    usage: "pull",
+    summary: 'Write the verified bundle to .evolve/bundle.generated.ts (run as "prebuild")',
+    run: (args, env) => pullCommand(args, { env }),
+  },
+  aggregate: {
+    usage: "aggregate [--upload]",
+    summary: "Run the cloud's aggregate request on your local DB (--upload sends the result)",
+    run: (args, env) => aggregateCommand(args, { env }),
+  },
+};
+
+function help(): string {
+  const width = Math.max(...Object.values(COMMANDS).map((c) => c.usage.length)) + 2;
+  return `Usage: next-evolve <command>\n\nCommands:\n${Object.values(COMMANDS)
+    .map((c) => `  ${c.usage.padEnd(width)}${c.summary}`)
+    .join("\n")}\n\nEnv is read from .env.local and .env (never overriding what's set).\n`;
+}
 
 function loadEnvFiles() {
   for (const f of [".env.local", ".env"]) {
@@ -24,40 +43,12 @@ function loadEnvFiles() {
   }
 }
 
-async function runMigrate(args: string[]): Promise<number> {
-  loadEnvFiles();
-  const i = args.indexOf("--url");
-  const url = i >= 0 ? args[i + 1] : process.env.EVOLVE_DATABASE_URL;
-  if (!url) {
-    console.error("next-evolve migrate: set EVOLVE_DATABASE_URL or pass --url");
-    return 1;
-  }
-  const sql = createSql(url, { max: 1 });
-  try {
-    const r = await migrate(sql);
-    console.warn(
-      r.applied.length
-        ? `Applied ${r.applied.join(", ")}`
-        : `Up to date (${r.skipped.join(", ") || "nothing to apply"})`,
-    );
-    return 0;
-  } catch (e) {
-    console.error("next-evolve migrate failed:", e instanceof Error ? e.message : e);
-    return 1;
-  } finally {
-    await sql.end({ timeout: 5 });
-  }
-}
-
 const [cmd, ...rest] = process.argv.slice(2);
-if (cmd === "migrate") process.exitCode = await runMigrate(rest);
-else if (cmd === "pull") {
+const command = cmd ? COMMANDS[cmd] : undefined;
+if (command) {
   loadEnvFiles();
-  process.exitCode = await pullCommand(rest, { env: process.env });
-} else if (cmd === "aggregate") {
-  loadEnvFiles();
-  process.exitCode = await aggregateCommand(rest, { env: process.env });
+  process.exitCode = await command.run(rest, process.env);
 } else {
-  process.stdout.write(HELP);
-  process.exitCode = cmd && cmd !== "help" && cmd !== "--help" ? 1 : 0;
+  process.stdout.write(help());
+  process.exitCode = cmd && cmd !== "help" && cmd !== "--help" && cmd !== "-h" ? 1 : 0;
 }
