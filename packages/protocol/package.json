@@ -1,6 +1,6 @@
 {
   "name": "@next-evolve/protocol",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Wire protocol for Evolve: bundle, signature and aggregate schemas shared by next-evolve and Evolve Cloud.",
   "license": "MIT",
   "type": "module",
