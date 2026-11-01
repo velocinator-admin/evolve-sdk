@@ -45,6 +45,7 @@ describe("writer", () => {
         anon_id: `a${i}`,
         variant_id: "c1d2e3",
         path: "/",
+        first_at: new Date("2026-10-31T09:00:00Z"),
       })),
     );
     w.events(Array.from({ length: 100 }, (_, i) => ev({ anon_id: `a${i}`, props: { i } })));
@@ -59,11 +60,15 @@ describe("writer", () => {
     expect(u?.n).toBe(5);
     const [e] = await sql`select props from evolve.events where anon_id = 'a7'`;
     expect(e?.props).toEqual({ i: 7 });
+    // first_at is the receipt time the row carries, not the flush time (attribution
+    // needs it on the same clock as event ts).
+    const [x] = await sql`select first_at from evolve.exposures where anon_id = 'a7'`;
+    expect((x!.first_at as Date).toISOString()).toBe("2026-10-31T09:00:00.000Z");
   });
 
   it("keeps the first exposure, the first identity link and one row per dedupe key", async () => {
     const w = createWriter({ sql: () => sql, mode: "serverless" });
-    const x = { experiment_id: "e1", anon_id: "a1", path: "/" };
+    const x = { experiment_id: "e1", anon_id: "a1", path: "/", first_at: new Date() };
     w.exposures([
       { ...x, variant_id: "v1" },
       { ...x, variant_id: "v2" },

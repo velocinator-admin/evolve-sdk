@@ -68,7 +68,13 @@ describe("collect", () => {
     );
     expect(status).toBe(204);
     expect(w.rows.exposures).toEqual([
-      { experiment_id: "k3j9x2", anon_id: ANON, variant_id: "c1d2e3", path: "/" },
+      {
+        experiment_id: "k3j9x2",
+        anon_id: ANON,
+        variant_id: "c1d2e3",
+        path: "/",
+        first_at: new Date("2026-10-31T12:00:00Z"),
+      },
     ]);
     expect(w.rows.usage).toEqual(new Map([["2026-10-31", 1]]));
     expect(w.rows.events.map((e) => [e.name, e.path, e.source, e.anon_id])).toEqual([

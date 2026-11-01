@@ -8,6 +8,8 @@ export type ExposureRow = {
   anon_id: string;
   variant_id: string;
   path: string;
+  /** When the beacon arrived (same clock as event `ts`), not when the batch is written. */
+  first_at: Date;
 };
 export type EventRow = {
   ts: Date;
@@ -94,7 +96,7 @@ export function createWriter(opts: WriterOptions): Writer {
 
   async function write(sql: Sql, batch: Batch) {
     for (const rows of chunks(batch.exposures)) {
-      await sql`insert into evolve.exposures ${sql(rows, "experiment_id", "anon_id", "variant_id", "path")}
+      await sql`insert into evolve.exposures ${sql(rows, "experiment_id", "anon_id", "variant_id", "path", "first_at")}
         on conflict do nothing`;
     }
     for (const rows of chunks(batch.events)) {

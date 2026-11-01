@@ -115,6 +115,7 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
             anon_id: anon,
             variant_id: e.v,
             path: normalizePath(e.p),
+            first_at: now,
           });
         }
         break;
