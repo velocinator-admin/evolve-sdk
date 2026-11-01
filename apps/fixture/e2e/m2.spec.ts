@@ -30,6 +30,8 @@ test("home → pricing: exposures, goal clicks, page-view goal and identify land
   // Leave via the goal link: the click is queued and flushed on page hide.
   await page.getByTestId("pricing-cta").click();
   await expect(page).toHaveURL(/\/signup$/);
+  // Submit only once React has hydrated, or the form posts natively.
+  await expect(page.locator("html")).toHaveAttribute("data-evolve", "ready");
   await page.getByPlaceholder("you@example.com").fill("ada@example.com");
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByTestId("signup-done")).toBeVisible();
