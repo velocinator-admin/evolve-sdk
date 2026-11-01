@@ -72,3 +72,11 @@ describe("verifyJws", () => {
     expect(times[1000]).toBeLessThan(0.2 * SLACK);
   });
 });
+
+describe("EVOLVE_PUBLIC_KEYS", () => {
+  it("holds valid Ed25519 keys", async () => {
+    const { EVOLVE_PUBLIC_KEYS } = await import("./keys");
+    expect(Object.keys(EVOLVE_PUBLIC_KEYS).length).toBeGreaterThan(0);
+    expect(() => createKeyRing(EVOLVE_PUBLIC_KEYS)).not.toThrow();
+  });
+});
