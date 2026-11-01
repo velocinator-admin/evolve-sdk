@@ -1,0 +1,117 @@
+import { expect, test } from "@playwright/test";
+import postgres from "postgres";
+import { simulate } from "../scripts/simulate";
+import { APP_URL, CLOUD_URL, DB_URL, TRACK_SECRET } from "./env";
+
+// T9.5: the traffic simulator drives the fixture over HTTP; its visitors land
+// in the customer DB and come back through a signed aggregate.
+const sql = postgres(DB_URL, { max: 1, onnotice: () => {} });
+test.afterAll(() => sql.end());
+
+const HERO = "k3j9x2";
+const CONTROL = "a8f2l1";
+const B = "c1d2e3";
+
+test("simulated visitors: exposures and conversions land locally and aggregate", async ({
+  request,
+}) => {
+  test.setTimeout(120_000);
+  const from = new Date(Date.now() - 1000).toISOString();
+  const r = await simulate({
+    url: APP_URL,
+    visitors: 300,
+    path: "/",
+    goal: "signup_submit",
+    rate: 0.1,
+    rates: { [B]: 0.4 },
+    serverShare: 0.3,
+    trackSecret: TRACK_SECRET,
+    seed: 42,
+    concurrency: 4,
+    keepIds: true,
+  });
+  expect(r.errors).toBe(0);
+  expect(r.visitors).toBe(300);
+  const ctrl = r.arms[`${HERO}:${CONTROL}`]!;
+  const b = r.arms[`${HERO}:${B}`]!;
+  expect(ctrl.n + b.n).toBe(300);
+  expect(b.c / b.n).toBeGreaterThan(ctrl.c / ctrl.n);
+
+  // Every simulated visitor's exposure and conversion is in the customer DB.
+  const ids = r.ids!;
+  const all = [...ids[`${HERO}:${CONTROL}`]!.all, ...ids[`${HERO}:${B}`]!.all];
+  const converted = [...ids[`${HERO}:${CONTROL}`]!.converted, ...ids[`${HERO}:${B}`]!.converted];
+  await expect
+    .poll(
+      async () =>
+        Number(
+          (
+            await sql`select count(*)::int as n from evolve.exposures
+                      where experiment_id = ${HERO} and anon_id = any(${all})`
+          )[0]!.n,
+        ),
+      { timeout: 15_000 },
+    )
+    .toBe(300);
+  await expect
+    .poll(
+      async () =>
+        Number(
+          (
+            await sql`select count(distinct anon_id)::int as n from evolve.events
+                      where name = 'signup_submit' and anon_id = any(${converted})`
+          )[0]!.n,
+        ),
+      { timeout: 15_000 },
+    )
+    .toBe(converted.length);
+
+  // The fake cloud's aggregate counts them (plus any other spec's browsing of "/").
+  const asOf = new Date(Date.now() + 5000).toISOString();
+  const res = await request.post(`${CLOUD_URL}/__control/aggregate`, {
+    data: {
+      appUrl: APP_URL,
+      request: {
+        asOf,
+        experiments: [
+          {
+            id: HERO,
+            variants: [CONTROL, B],
+            cohortsFrom: from.slice(0, 10),
+            goals: [
+              {
+                key: "signed_up",
+                role: "primary",
+                hash: "h-signed_up",
+                def: {
+                  kind: "event",
+                  event: "signup_submit",
+                  window: "7d",
+                  unit: "visitor",
+                  direction: "increase",
+                  source: null,
+                  where: null,
+                  value: null,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  const x = (await res.json()) as {
+    verified: boolean;
+    response: { rows: { var: string; n: number; c: number }[] };
+  };
+  expect(x.verified).toBe(true);
+  const sum = (v: string, k: "n" | "c") =>
+    x.response.rows.filter((row) => row.var === v).reduce((s, row) => s + row[k], 0);
+  for (const [v, arm] of [
+    [CONTROL, ctrl],
+    [B, b],
+  ] as const) {
+    expect(sum(v, "n")).toBeGreaterThanOrEqual(arm.n);
+    expect(sum(v, "c")).toBeGreaterThanOrEqual(arm.c);
+  }
+});
