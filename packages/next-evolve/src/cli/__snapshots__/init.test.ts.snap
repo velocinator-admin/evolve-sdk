@@ -1,0 +1,261 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`init: idempotent, --dry-run, --yes (T11.5) > --dry-run prints the diff and changes nothing: no files, install, migration or cloud writes 1`] = `
+"Would change:
+
+*** .env.local
+  …
+  EVOLVE_TRACK_SECRET=…
++ 
++ # Evolve
++ EVOLVE_SECRET_KEY=…
++ EVOLVE_WEBHOOK_SECRET=…
++ EVOLVE_DATABASE_URL=…
+
+*** .gitignore
+  …
+  .next
++ 
++ # Evolve build bundle
++ .evolve/
+
++++ app/[evolve]/page.tsx (new)
++ import { evolveMetadata, evolveStaticParams, withEvolve } from "next-evolve";
++ 
++ function Home() {
++   return <h1>Home</h1>;
++ }
++ 
++ // Static mode (next-evolve): one cached render per variant under [evolve].
++ export const dynamicParams = true;
++ export const generateStaticParams = evolveStaticParams;
++ export const revalidate = 3600;
++ export const generateMetadata = evolveMetadata("/");
++ export default withEvolve(Home, { path: "/" });
+
++++ app/[evolve]/pricing/page.tsx (new)
++ import type { Metadata } from "next";
++ import { evolveMetadata, evolveStaticParams, withEvolve } from "next-evolve";
++ 
++ const metadata: Metadata = { title: "Pricing" };
++ 
++ function Pricing() {
++   return <h1>Pricing</h1>;
++ }
++ 
++ // Static mode (next-evolve): one cached render per variant under [evolve].
++ export const dynamicParams = true;
++ export const generateStaticParams = evolveStaticParams;
++ export const revalidate = 3600;
++ export const generateMetadata = evolveMetadata("/pricing", metadata);
++ export default withEvolve(Pricing, { path: "/pricing" });
+
++++ app/api/evolve/[...evolve]/route.ts (new)
++ import { createEvolveHandler } from "next-evolve/server";
++ import evolveConfig from "../../../../evolve.config";
++ import goals from "../../../../evolve.goals";
++ 
++ // collect (beacon), track, sync (cloud webhook), aggregate (cloud), health
++ export const { GET, POST } = createEvolveHandler({ config: evolveConfig, goals });
++ export const maxDuration = 60;
+
+*** app/layout.tsx
+  import type { ReactNode } from "react";
++ import { EvolveScript } from "next-evolve/client";
+  
+  …
+          {children}
++         <EvolveScript />
+        </body>
+  …
+
+--- app/page.tsx (removed)
+
+--- app/pricing/page.tsx (removed)
+
++++ evolve.config.ts (new)
++ import { defineConfig } from "next-evolve/config";
++ 
++ export default defineConfig({
++   // Pages Evolve may test. "static": cached per variant (moved under app/[evolve]/).
++   // "dynamic": rendered per request, the page stays where it is.
++   routes: {
++     "/": { mode: "static" },
++     "/pricing": { mode: "static" },
++   },
++ });
+
++++ evolve.goals.ts (new)
++ import { defineGoals } from "next-evolve/config";
++ 
++ // What counts as success. Fire events with data-evolve-goal="<event>" on a
++ // link or form, or evolve.track("<event>") on the server.
++ export default defineGoals({
++   signed_up: { event: "signup", window: "7d" },
++ });
+
++++ instrumentation.ts (new)
++ export async function register() {
++   if (process.env.NEXT_RUNTIME === "nodejs") {
++     const [{ registerEvolve }, { default: config }, { default: goals }] = await Promise.all([
++       import("next-evolve/instrumentation"),
++       import("./evolve.config"),
++       import("./evolve.goals"),
++     ]);
++     await registerEvolve({ config, goals });
++   }
++ }
+
+*** package.json
+  …
+      "dev": "next dev",
+-     "build": "next build"
++     "build": "next build",
++     "prebuild": "next-evolve pull"
+    },
+  …
+
++++ proxy.ts (new)
++ import { createEvolveProxy } from "next-evolve/proxy";
++ import buildBundle from "./.evolve/bundle.generated";
++ import evolveConfig from "./evolve.config";
++ 
++ export const proxy = createEvolveProxy(evolveConfig, { buildBundle });
++ 
++ export const config = { matcher: ["/", "/pricing", "/(ev_.*)"] };
+
+  /: moved app/page.tsx → app/[evolve]/page.tsx (static mode)
+  /pricing: moved app/pricing/page.tsx → app/[evolve]/pricing/page.tsx (static mode)
+  would register the app URL https://app.example.com
+
+Next:
+  1. Wrap a component: <Optimizable id="hero" component={Hero} props={...} /> (from "next-evolve")
+  2. Visit the page once so the region registers, then open the dashboard
+  3. After you deploy: npx next-evolve connect --test"
+`;
+
+exports[`init: idempotent, --dry-run, --yes (T11.5) > writes the expected files (snapshot), and a re-run writes nothing 1`] = `
+{
+  ".env.local": "DATABASE_URL=postgres://mine
+EVOLVE_TRACK_SECRET=keep-me
+
+# Evolve
+EVOLVE_SECRET_KEY=evk_live_site_fakecloud0_TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT
+EVOLVE_WEBHOOK_SECRET=whsec_WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW
+EVOLVE_DATABASE_URL=postgres://mine
+",
+  ".gitignore": "node_modules
+.next
+
+# Evolve build bundle
+.evolve/
+",
+  "app/[evolve]/page.tsx": "import { evolveMetadata, evolveStaticParams, withEvolve } from "next-evolve";
+
+function Home() {
+  return <h1>Home</h1>;
+}
+
+// Static mode (next-evolve): one cached render per variant under [evolve].
+export const dynamicParams = true;
+export const generateStaticParams = evolveStaticParams;
+export const revalidate = 3600;
+export const generateMetadata = evolveMetadata("/");
+export default withEvolve(Home, { path: "/" });
+",
+  "app/[evolve]/pricing/page.tsx": "import type { Metadata } from "next";
+import { evolveMetadata, evolveStaticParams, withEvolve } from "next-evolve";
+
+const metadata: Metadata = { title: "Pricing" };
+
+function Pricing() {
+  return <h1>Pricing</h1>;
+}
+
+// Static mode (next-evolve): one cached render per variant under [evolve].
+export const dynamicParams = true;
+export const generateStaticParams = evolveStaticParams;
+export const revalidate = 3600;
+export const generateMetadata = evolveMetadata("/pricing", metadata);
+export default withEvolve(Pricing, { path: "/pricing" });
+",
+  "app/api/evolve/[...evolve]/route.ts": "import { createEvolveHandler } from "next-evolve/server";
+import evolveConfig from "../../../../evolve.config";
+import goals from "../../../../evolve.goals";
+
+// collect (beacon), track, sync (cloud webhook), aggregate (cloud), health
+export const { GET, POST } = createEvolveHandler({ config: evolveConfig, goals });
+export const maxDuration = 60;
+",
+  "app/layout.tsx": "import type { ReactNode } from "react";
+import { EvolveScript } from "next-evolve/client";
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        {children}
+        <EvolveScript />
+      </body>
+    </html>
+  );
+}
+",
+  "evolve.config.ts": "import { defineConfig } from "next-evolve/config";
+
+export default defineConfig({
+  // Pages Evolve may test. "static": cached per variant (moved under app/[evolve]/).
+  // "dynamic": rendered per request, the page stays where it is.
+  routes: {
+    "/": { mode: "static" },
+    "/pricing": { mode: "static" },
+  },
+});
+",
+  "evolve.goals.ts": "import { defineGoals } from "next-evolve/config";
+
+// What counts as success. Fire events with data-evolve-goal="<event>" on a
+// link or form, or evolve.track("<event>") on the server.
+export default defineGoals({
+  signed_up: { event: "signup", window: "7d" },
+});
+",
+  "instrumentation.ts": "export async function register() {
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const [{ registerEvolve }, { default: config }, { default: goals }] = await Promise.all([
+      import("next-evolve/instrumentation"),
+      import("./evolve.config"),
+      import("./evolve.goals"),
+    ]);
+    await registerEvolve({ config, goals });
+  }
+}
+",
+  "package.json": "{
+  "name": "acme",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "prebuild": "next-evolve pull"
+  },
+  "dependencies": {
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "next-evolve": "^0.2.2",
+    "zod": "^4.0.0"
+  }
+}
+",
+  "pnpm-lock.yaml": "",
+  "proxy.ts": "import { createEvolveProxy } from "next-evolve/proxy";
+import buildBundle from "./.evolve/bundle.generated";
+import evolveConfig from "./evolve.config";
+
+export const proxy = createEvolveProxy(evolveConfig, { buildBundle });
+
+export const config = { matcher: ["/", "/pricing", "/(ev_.*)"] };
+",
+  "tsconfig.json": "{}",
+}
+`;

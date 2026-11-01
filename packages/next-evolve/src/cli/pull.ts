@@ -46,14 +46,20 @@ export async function pullCommand(_args: string[], deps: PullDeps): Promise<numb
   const valid = (token: string | null) =>
     token && site ? verifyBundle(token, { keys, site, now }) : null;
 
-  let previous: string | null = null;
+  let current: string | null = null;
   try {
-    previous = readBuildBundle(readFileSync(file, "utf8"));
+    current = readFileSync(file, "utf8");
   } catch {}
+  const previous = current === null ? null : readBuildBundle(current);
+  // Same content → no write (a re-run of init changes nothing on disk).
+  const write = (token: string | null) => {
+    const next = renderBuildBundle(token);
+    if (next !== current) writeFileSync(file, next);
+  };
   const keep = (why: string) => {
     const prev = valid(previous);
     const token = prev?.ok ? previous : null;
-    writeFileSync(file, renderBuildBundle(token));
+    write(token);
     err(
       `next-evolve pull: ${why}; ${token ? "kept the previous bundle" : "wrote an empty build bundle (control until the first fetch)"}`,
     );
@@ -68,7 +74,7 @@ export async function pullCommand(_args: string[], deps: PullDeps): Promise<numb
   if (res.status !== "ok") return keep("unexpected 304");
   const v = valid(res.token);
   if (!v?.ok) return keep(`bundle rejected (${v?.reason ?? "invalid"})`);
-  writeFileSync(file, renderBuildBundle(res.token));
+  write(res.token);
   out(`next-evolve pull: wrote ${BUILD_BUNDLE_PATH} (ver ${v.payload.ver})`);
   return 0;
 }

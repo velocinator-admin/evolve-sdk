@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type FakeCloud,
@@ -165,5 +165,79 @@ describe("next-evolve init (spec §16.1)", () => {
     const r = await run(dir, [...keys, "--yes"]);
     expect(r.code).toBe(1);
     expect(existsSync(join(dir, "evolve.config.js"))).toBe(false);
+  });
+});
+
+/** Every file under dir (but node_modules) → content. */
+function tree(dir: string, sub = ""): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of readdirSync(join(dir, sub), { withFileTypes: true })) {
+    const p = sub ? `${sub}/${e.name}` : e.name;
+    if (e.name === "node_modules") continue;
+    if (e.isDirectory()) Object.assign(out, tree(dir, p));
+    else out[p] = readFileSync(join(dir, p), "utf8");
+  }
+  return out;
+}
+const mtimes = (dir: string) =>
+  Object.fromEntries(Object.keys(tree(dir)).map((p) => [p, statSync(join(dir, p)).mtimeMs]));
+
+describe("init: idempotent, --dry-run, --yes (T11.5)", () => {
+  const args = [...keys, "--yes", "--routes", "/ /pricing"];
+  const app = () =>
+    freshApp({
+      "app/pricing/page.tsx":
+        'import type { Metadata } from "next";\n\nexport const metadata: Metadata = { title: "Pricing" };\n\nexport default function Pricing() {\n  return <h1>Pricing</h1>;\n}\n',
+    });
+
+  it("writes the expected files (snapshot), and a re-run writes nothing", async () => {
+    cloud.publish({ site: TEST_SITE, routing: { routes: {}, experiments: {} }, variants: {} });
+    const dir = app();
+    const first = await run(dir, args);
+    expect(first.code, first.text).toBe(0);
+    const files = tree(dir);
+    delete files[".evolve/bundle.generated.ts"]; // a signed token, different every publish
+    expect(files).toMatchSnapshot();
+
+    const before = mtimes(dir);
+    const again = await run(dir, args);
+    expect(again.code, again.text).toBe(0);
+    expect(again.text).toContain("files already set up");
+    expect(again.text).not.toMatch(/^\s+(created|updated|removed) /m);
+    expect(mtimes(dir)).toEqual(before);
+  });
+
+  it("--dry-run prints the diff and changes nothing: no files, install, migration or cloud writes", async () => {
+    const dir = app();
+    const pkg = JSON.parse(read(dir, "package.json"));
+    delete pkg.dependencies.zod;
+    writeFileSync(join(dir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+    const before = tree(dir);
+    const putsBefore = cloud.calls.filter((c) => c.method === "PUT").length;
+
+    const r = await run(dir, [...args, "--dry-run", "--app-url", "https://app.example.com"]);
+    expect(r.code, r.text).toBe(0);
+    expect(tree(dir)).toEqual(before);
+    expect(r.runCmd).not.toHaveBeenCalled();
+    expect(r.setupDb).not.toHaveBeenCalled();
+    expect(r.push).not.toHaveBeenCalled();
+    expect(cloud.calls.filter((c) => c.method === "PUT").length).toBe(putsBefore);
+    expect(r.text).toContain("would install zod@^4");
+    expect(r.text).toContain("would register the app URL https://app.example.com");
+    expect(r.text).toContain("+++ app/[evolve]/pricing/page.tsx (new)");
+    expect(r.text).toContain("--- app/pricing/page.tsx (removed)");
+    // Secrets never printed.
+    expect(r.text).not.toContain(TEST_SECRET_KEY);
+    expect(r.text).toContain("EVOLVE_SECRET_KEY=…");
+    expect(r.text.slice(r.text.indexOf("Would change:"))).toMatchSnapshot();
+  });
+
+  it("--yes never prompts; without it the DB reuse question is asked", async () => {
+    const ask = vi.fn(async () => "y");
+    await run(app(), args, { ask });
+    expect(ask).not.toHaveBeenCalled();
+    const asked = await run(app(), [...keys, "--routes", "/"], { ask });
+    expect(asked.code, asked.text).toBe(0);
+    expect(ask).toHaveBeenCalledWith(expect.stringMatching(/Use DATABASE_URL/));
   });
 });
