@@ -2,7 +2,18 @@
 
 Self-improving Next.js sites: server-side variants with no flicker, measured in your own Postgres. Needs an Evolve Cloud account.
 
-> Alpha. The setup below is what `npx next-evolve init` will write (E11).
+> Alpha.
+
+## Setup
+
+```sh
+npx next-evolve init --routes "/ /pricing"   # add --dry-run to see the diff first
+npx next-evolve doctor                       # checks env, key, DB, bundle, proxy, pages, cloud → app
+```
+
+`init` installs the package, connects to your site (secret key and webhook secret from the dashboard), sets up the database, and writes the config, route handler, proxy, layout script, instrumentation and `prebuild` hook. Static-mode pages move under `app/[evolve]/` and get wrapped with `withEvolve()`; when that isn't safe (a top-level `[slug]`, `force-dynamic`, a `"use client"` page…) the route stays in dynamic mode and `init` says why. It never overwrites your `.env.local` lines, and a re-run changes nothing. `--yes` skips every prompt.
+
+Other commands: `migrate`, `pull`, `push`, `connect --test [--app-url]`, `aggregate`. The sections below describe what `init` writes.
 
 ## Database
 
