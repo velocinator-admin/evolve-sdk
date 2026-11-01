@@ -204,3 +204,79 @@ describe("fake cloud: aggregation", () => {
     expect(cloud.uploads.map((u) => u.verified)).toEqual([true, false]);
   });
 });
+
+describe("fake cloud: sync webhooks", () => {
+  type Got = { body: string; sig: string | undefined; delivery: string | undefined; path: string };
+  /** A stand-in app that records sync calls and answers `status`. */
+  async function app(status = 202) {
+    const got: Got[] = [];
+    const server = createServer(async (req, res) => {
+      let body = "";
+      for await (const c of req) body += c;
+      got.push({
+        body,
+        sig: req.headers["evolve-signature"] as string | undefined,
+        delivery: req.headers["evolve-delivery"] as string | undefined,
+        path: req.url ?? "",
+      });
+      res.writeHead(status).end();
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+    return { url: `http://127.0.0.1:${port}`, got, close: () => server.close() };
+  }
+
+  it("publish with notify sends a signed bundle.updated webhook and records it", async () => {
+    const a = await app();
+    try {
+      const res = await fetch(`${cloud.url}/__control/publish`, {
+        method: "POST",
+        body: JSON.stringify({ ...content, notify: a.url }),
+      });
+      const out = (await res.json()) as { ver: number; iat: number; webhook: { status: number } };
+      expect(out.webhook.status).toBe(202);
+      expect(a.got).toHaveLength(1);
+      const call = a.got[0]!;
+      expect(call.path).toBe("/api/evolve/sync");
+      expect(verifyBody(call.sig, call.body, TEST_WEBHOOK_SECRET).ok).toBe(true);
+      expect(call.delivery).toMatch(/^[0-9a-f-]{36}$/);
+      expect(JSON.parse(call.body)).toEqual({
+        pv: 1,
+        type: "bundle.updated",
+        site: TEST_SITE,
+        ver: out.ver,
+        iat: out.iat,
+      });
+      expect(cloud.webhooks.at(-1)).toMatchObject({ status: 202, delivery: call.delivery });
+    } finally {
+      a.close();
+    }
+  });
+
+  it("sends pings, forged signatures and replays on request", async () => {
+    const a = await app();
+    try {
+      const ping = await cloud.webhook(a.url, { body: { pv: 1, type: "ping" } });
+      expect(JSON.parse(a.got[0]!.body)).toEqual({ pv: 1, type: "ping" });
+      await cloud.webhook(a.url, { body: { pv: 1, type: "ping" }, delivery: ping.delivery });
+      expect(a.got[1]!.delivery).toBe(ping.delivery);
+      await cloud.webhook(a.url, {
+        body: { pv: 1, type: "ping" },
+        secret: `whsec_${"x".repeat(32)}`,
+      });
+      expect(verifyBody(a.got[2]!.sig, a.got[2]!.body, TEST_WEBHOOK_SECRET).ok).toBe(false);
+      await cloud.webhook(a.url, { body: { pv: 1, type: "ping" }, t: 1 });
+      expect(verifyBody(a.got[3]!.sig, a.got[3]!.body, TEST_WEBHOOK_SECRET)).toMatchObject({
+        reason: "stale",
+      });
+    } finally {
+      a.close();
+    }
+  });
+
+  it("records an unreachable app as status 0", async () => {
+    const x = await cloud.webhook("http://127.0.0.1:1", { body: { pv: 1, type: "ping" } });
+    expect(x.status).toBe(0);
+    expect(x.error).toBeTruthy();
+  });
+});

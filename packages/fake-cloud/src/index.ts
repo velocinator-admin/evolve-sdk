@@ -9,6 +9,7 @@ import {
   BUNDLE_TYP,
   type BundlePayload,
   computeBundleHash,
+  DELIVERY_HEADER,
   type Manifest,
   manifestSchema,
   newRequestId,
@@ -49,6 +50,29 @@ export type AggregateExchange = {
   body: unknown;
 };
 
+/** What a test asks the fake cloud to send to `<appUrl>/api/evolve/sync`. */
+export type WebhookInput = {
+  /** Defaults to `bundle.updated` for the site's current bundle. */
+  body?: Record<string, unknown>;
+  site?: string;
+  /** Reuse a delivery id (replay tests). */
+  delivery?: string;
+  /** Signature timestamp (unix seconds), e.g. stale. */
+  t?: number;
+  /** Sign with another secret (forgery tests). */
+  secret?: string;
+};
+
+/** One sync webhook the fake cloud sent. `status` 0 = unreachable. */
+export type WebhookExchange = {
+  appUrl: string;
+  delivery: string;
+  body: Record<string, unknown>;
+  status: number;
+  error?: string;
+  at: number;
+};
+
 /** A CLI upload (`POST /v1/aggregates`). */
 export type AggregateUpload = {
   site: string;
@@ -76,6 +100,11 @@ export type FakeCloud = {
   /** The next request handed to `next-evolve aggregate` (`POST /v1/aggregates/request`), per site. */
   setAggregateRequest(site: string, input: AggregateInput): void;
   uploads: AggregateUpload[];
+  /** Signs and POSTs a sync webhook to `<appUrl>/api/evolve/sync`; never throws. */
+  webhook(appUrl: string, input?: WebhookInput): Promise<WebhookExchange>;
+  webhooks: WebhookExchange[];
+  /** App URL per site (`PUT /v1/site/app-url`). */
+  appUrls: Map<string, string>;
   close(): Promise<void>;
 };
 
@@ -84,7 +113,10 @@ type Stored = { token: string; payload: BundlePayload };
 /**
  * Protocol-level mock of Evolve Cloud (no stats, no dashboard, no AI).
  * - `GET /v1/bundle` (bearer secret key, ETag `"<ver>.<iat>"`, 304 on match)
- * - `POST /__control/publish` (JSON {@link PublishInput}) → signed bundle
+ * - `POST /__control/publish` (JSON {@link PublishInput} + optional `notify: appUrl`) → signed
+ *   bundle, then a signed `bundle.updated` webhook to `notify`
+ * - `POST /__control/webhook` ({ appUrl, ...{@link WebhookInput} }) → signed sync webhook
+ * - `PUT /v1/site/app-url`, `GET /v1/site` (CLI)
  * - `GET /__control/state` → recorded calls
  * - `POST /__control/aggregate` ({ appUrl, site?, request }) → signed aggregate request to the app
  * - `POST /__control/aggregate-request` ({ site?, request }) → what `/v1/aggregates/request` returns
@@ -165,6 +197,42 @@ export async function startFakeCloud(
     aggregates.push(exchange);
     return exchange;
   }
+  const webhooks: WebhookExchange[] = [];
+  const appUrls = new Map<string, string>();
+
+  async function webhook(appUrl: string, input: WebhookInput = {}): Promise<WebhookExchange> {
+    const site = input.site ?? TEST_SITE;
+    const cur = bundles.get(site)?.payload;
+    const body = input.body ?? {
+      pv: PROTOCOL_VERSION,
+      type: "bundle.updated",
+      site,
+      ver: cur?.ver ?? 0,
+      iat: cur?.iat ?? Math.floor(Date.now() / 1000),
+    };
+    const text = JSON.stringify(body);
+    const delivery = input.delivery ?? randomUUID();
+    const x: WebhookExchange = { appUrl, delivery, body, status: 0, at: Date.now() };
+    try {
+      const res = await fetch(new URL("/api/evolve/sync", appUrl), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          [SIGNATURE_HEADER]: signBody(input.secret ?? secretFor(site), text, input.t),
+          [DELIVERY_HEADER]: delivery,
+        },
+        body: text,
+        signal: AbortSignal.timeout(10_000),
+      });
+      await res.body?.cancel().catch(() => {});
+      x.status = res.status;
+    } catch (e) {
+      x.error = String(e);
+    }
+    webhooks.push(x);
+    return x;
+  }
+
   const bundles = new Map<string, Stored>();
   const calls: RecordedCall[] = [];
   const manifests = new Map<string, Manifest>();
@@ -283,11 +351,48 @@ export async function startFakeCloud(
     }
 
     if (req.method === "POST" && url.pathname === "/__control/publish") {
+      let out: Stored;
+      let notify: string | undefined;
       try {
-        const out = publish(JSON.parse(await readBody(req)));
-        return send(200, { ver: out.payload.ver, iat: out.payload.iat, token: out.token });
+        const b = JSON.parse(await readBody(req)) as PublishInput & { notify?: string };
+        notify = b.notify;
+        out = publish(b);
       } catch (e) {
         return send(400, { error: String(e) });
+      }
+      const sent = notify ? await webhook(notify, { site: out.payload.site }) : undefined;
+      return send(200, {
+        ver: out.payload.ver,
+        iat: out.payload.iat,
+        token: out.token,
+        ...(sent ? { webhook: sent } : {}),
+      });
+    }
+
+    if (req.method === "POST" && url.pathname === "/__control/webhook") {
+      try {
+        const b = JSON.parse(await readBody(req)) as WebhookInput & { appUrl: string };
+        return send(200, await webhook(b.appUrl, b));
+      } catch (e) {
+        return send(400, { error: String(e) });
+      }
+    }
+
+    if (url.pathname === "/v1/site" && req.method === "GET") {
+      if (!site) return send(401, { error: "invalid_key" });
+      return send(200, { site, name: "Fake site", appUrl: appUrls.get(site) ?? null });
+    }
+
+    if (url.pathname === "/v1/site/app-url" && req.method === "PUT") {
+      if (!site) return send(401, { error: "invalid_key" });
+      try {
+        const b = JSON.parse(await readBody(req)) as { appUrl?: string };
+        const u = new URL(b.appUrl ?? "");
+        if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("protocol");
+        appUrls.set(site, u.origin);
+        return send(200, { appUrl: u.origin });
+      } catch {
+        return send(400, { error: "invalid_app_url" });
       }
     }
 
@@ -299,6 +404,8 @@ export async function startFakeCloud(
         regions: Object.fromEntries([...regions].map(([k, v]) => [k, Object.fromEntries(v)])),
         aggregates,
         uploads,
+        webhooks,
+        appUrls: Object.fromEntries(appUrls),
       });
     }
 
@@ -328,6 +435,9 @@ export async function startFakeCloud(
       pendingRequests.set(site, input);
     },
     uploads,
+    webhook,
+    webhooks,
+    appUrls,
     close: () =>
       new Promise((resolve, reject) => {
         server.closeAllConnections();
