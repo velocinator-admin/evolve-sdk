@@ -1,9 +1,12 @@
 import { SUPPORTED_PROTOCOLS } from "@next-evolve/protocol";
+import { sdkVersion } from "../cloud/manifest";
 import { type EvolveConfig, resolveConfig } from "../config/config";
 import { type Goals, serializeGoals } from "../config/goals";
 import { createBotDetector } from "../core/bots";
 import { logRateLimited } from "../core/log";
+import { getSql } from "../db/client";
 import { getBundleStore } from "../store/runtime";
+import { handleAggregate } from "./aggregate-route";
 import { handleCollect } from "./collect";
 import { runtimeWriter, scheduleFlush, setRuntime } from "./runtime";
 import { handleTrack } from "./track-route";
@@ -18,8 +21,8 @@ const notFound = () => Response.json({ error: "not_found" }, { status: 404 });
 
 /**
  * Route handlers for `app/api/evolve/[...evolve]/route.ts`:
- * `POST collect` (beacon), `POST track` (bearer webhook), `GET health`.
- * Sync and aggregate arrive with M3/M4.
+ * `POST collect` (beacon), `POST track` (bearer webhook), `POST aggregate`
+ * (signed cloud request), `GET health`. Sync arrives with T7.5.
  */
 export function createEvolveHandler(opts: EvolveHandlerOptions) {
   const cfg = resolveConfig(opts.config);
@@ -54,6 +57,13 @@ export function createEvolveHandler(opts: EvolveHandlerOptions) {
             secret: env().EVOLVE_TRACK_SECRET,
             goals: opts.goals,
             writer: runtimeWriter(),
+          });
+        case "aggregate":
+          return await handleAggregate(req, {
+            config: cfg,
+            env: env(),
+            sql: () => getSql(cfg.databaseUrlEnv, env()),
+            sdkVersion: sdkVersion(),
           });
         default:
           return notFound();

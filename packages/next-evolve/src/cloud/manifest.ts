@@ -18,6 +18,11 @@ const versionOf = (load: () => { version: string }): string | null => {
   }
 };
 
+/** This package's version (`0.0.0` if unknown). */
+export function sdkVersion(): string {
+  return versionOf(() => require("next-evolve/package.json")) ?? "0.0.0";
+}
+
 /** The manifest this app sends to the cloud (spec §8.4). Configuration only. */
 export function buildManifest(
   config: EvolveConfig,
@@ -29,7 +34,7 @@ export function buildManifest(
   const serialized = goals ? serializeGoals(goals) : {};
   return {
     pv: PROTOCOL_VERSION,
-    sdkVersion: versionOf(() => require("next-evolve/package.json")) ?? "0.0.0",
+    sdkVersion: sdkVersion(),
     protocol: { supported: [...SUPPORTED_PROTOCOLS] },
     nextVersion: versionOf(() => require("next/package.json")),
     routes,
