@@ -13,6 +13,7 @@ import {
   type Manifest,
   manifestSchema,
   newRequestId,
+  PREVIEW_TYP,
   PROTOCOL_VERSION,
   parseSecretKey,
   type RegionRegistration,
@@ -46,6 +47,15 @@ export type RecordedCall = {
 /** What a test asks the fake cloud to send; it fills type, pv, requestId and site. */
 export type AggregateInput = Partial<AggregateRequest> &
   Pick<AggregateRequest, "experiments"> & { asOf?: string };
+
+/** How `aggregate()` signs and delivers: defaults are a fresh delivery id and the current time. */
+export type AggregateOptions = {
+  site?: string;
+  /** Reuse a delivery id (replay tests). */
+  delivery?: string;
+  /** Signature timestamp (unix seconds), e.g. stale. */
+  t?: number;
+};
 
 /** One aggregate request the fake cloud sent to an app, and what came back. */
 export type AggregateExchange = {
@@ -101,12 +111,16 @@ export type FakeCloud = {
   aggregate(
     appUrl: string,
     input: AggregateInput,
-    opts?: { site?: string },
+    opts?: AggregateOptions,
   ): Promise<AggregateExchange>;
   aggregates: AggregateExchange[];
   /** The next request handed to `next-evolve aggregate` (`POST /v1/aggregates/request`), per site. */
   setAggregateRequest(site: string, input: AggregateInput): void;
   uploads: AggregateUpload[];
+  /** Signs a dashboard-style preview token that forces `code` on `site`. */
+  preview(input: { site?: string; code: string; exp?: number }): string;
+  /** Sites whose bearer requests get their connection dropped (cloud unreachable). */
+  down: Set<string>;
   /** Signs and POSTs a sync webhook to `<appUrl>/api/evolve/sync`; never throws. */
   webhook(appUrl: string, input?: WebhookInput): Promise<WebhookExchange>;
   webhooks: WebhookExchange[];
@@ -125,13 +139,23 @@ type Stored = { token: string; payload: BundlePayload };
  * - `POST /__control/webhook` ({ appUrl, ...{@link WebhookInput} }) → signed sync webhook
  * - `PUT /v1/site/app-url`, `GET /v1/site` (CLI)
  * - `GET /__control/state` → recorded calls
- * - `POST /__control/aggregate` ({ appUrl, site?, request }) → signed aggregate request to the app
+ * - `POST /__control/aggregate` ({ appUrl, site?, delivery?, t?, request }) → signed aggregate
+ *   request to the app
+ * - `POST /__control/preview` ({ site?, code, exp? }) → { token }: a signed preview token
+ * - `POST /__control/outage` ({ site?, down }) → that site's bearer requests drop the connection
  * - `POST /__control/aggregate-request` ({ site?, request }) → what `/v1/aggregates/request` returns
  * - `POST /v1/aggregates/request`, `POST /v1/aggregates` (CLI: fetch a request, upload its signed response)
  */
 export async function startFakeCloud(
-  opts: { port?: number; key?: TestKeyPair; webhookSecrets?: Record<string, string> } = {},
+  opts: {
+    port?: number;
+    key?: TestKeyPair;
+    webhookSecrets?: Record<string, string>;
+    /** Sites that start out unreachable (see {@link FakeCloud.down}). */
+    downSites?: string[];
+  } = {},
 ): Promise<FakeCloud> {
+  const down = new Set(opts.downSites ?? []);
   const key = opts.key ?? TEST_KEY;
   const secrets: Record<string, string> = {
     [TEST_SITE]: TEST_WEBHOOK_SECRET,
@@ -177,7 +201,7 @@ export async function startFakeCloud(
   async function aggregate(
     appUrl: string,
     input: AggregateInput,
-    o: { site?: string } = {},
+    o: AggregateOptions = {},
   ): Promise<AggregateExchange> {
     const site = o.site ?? TEST_SITE;
     const request = fill(site, input);
@@ -186,8 +210,8 @@ export async function startFakeCloud(
       method: "POST",
       headers: {
         "content-type": "application/json",
-        [SIGNATURE_HEADER]: signBody(secretFor(site), text),
-        "evolve-delivery": randomUUID(),
+        [SIGNATURE_HEADER]: signBody(secretFor(site), text, o.t),
+        [DELIVERY_HEADER]: o.delivery ?? randomUUID(),
       },
       body: text,
     });
@@ -263,6 +287,15 @@ export async function startFakeCloud(
     return stored;
   }
 
+  function preview(input: { site?: string; code: string; exp?: number }): string {
+    const payload = {
+      site: input.site ?? TEST_SITE,
+      code: input.code,
+      exp: input.exp ?? Math.floor(Date.now() / 1000) + 3600,
+    };
+    return signJws(payload, { ...key, typ: PREVIEW_TYP });
+  }
+
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://fake");
     const auth = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
@@ -286,6 +319,12 @@ export async function startFakeCloud(
     };
 
     if (req.method === "GET" && url.pathname === "/health") return send(200, { ok: true });
+
+    // An unreachable cloud, as the app sees it: the connection drops, nothing is recorded.
+    if (site && down.has(site)) {
+      req.socket.destroy();
+      return;
+    }
 
     if (
       req.method === "POST" &&
@@ -330,12 +369,12 @@ export async function startFakeCloud(
 
     if (req.method === "POST" && url.pathname === "/__control/aggregate") {
       try {
-        const b = JSON.parse(await readBody(req)) as {
+        const b = JSON.parse(await readBody(req)) as AggregateOptions & {
           appUrl: string;
-          site?: string;
           request: AggregateInput;
         };
-        return send(200, await aggregate(b.appUrl, b.request, { site: b.site }));
+        const { appUrl, request, ...o } = b;
+        return send(200, await aggregate(appUrl, request, o));
       } catch (e) {
         return send(400, { error: String(e) });
       }
@@ -431,6 +470,27 @@ export async function startFakeCloud(
       }
     }
 
+    if (req.method === "POST" && url.pathname === "/__control/preview") {
+      try {
+        const b = JSON.parse(await readBody(req)) as { site?: string; code: string; exp?: number };
+        return send(200, { token: preview(b) });
+      } catch (e) {
+        return send(400, { error: String(e) });
+      }
+    }
+
+    if (req.method === "POST" && url.pathname === "/__control/outage") {
+      try {
+        const b = JSON.parse(await readBody(req)) as { site?: string; down: boolean };
+        const s = b.site ?? TEST_SITE;
+        if (b.down) down.add(s);
+        else down.delete(s);
+        return send(200, { down: [...down] });
+      } catch (e) {
+        return send(400, { error: String(e) });
+      }
+    }
+
     if (req.method === "GET" && url.pathname === "/__control/state") {
       return send(200, {
         calls,
@@ -470,6 +530,8 @@ export async function startFakeCloud(
       pendingRequests.set(site, input);
     },
     uploads,
+    preview,
+    down,
     webhook,
     webhooks,
     appUrls,

@@ -5,7 +5,14 @@ import {
   appEnv,
   CLOUD_PORT,
   CLOUD_URL,
+  EDGE_APP_PORT,
+  EDGE_APP_URL,
+  edgeAppEnv,
   HUMAN_UA,
+  OFFLINE_APP_PORT,
+  OFFLINE_APP_URL,
+  OFFLINE_SITE,
+  offlineAppEnv,
   SYNC_APP_PORT,
   SYNC_APP_URL,
   syncAppEnv,
@@ -43,7 +50,7 @@ export default defineConfig({
     {
       command: "pnpm --filter @next-evolve/fake-cloud start",
       url: `${CLOUD_URL}/health`,
-      env: { FAKE_CLOUD_PORT: String(CLOUD_PORT) },
+      env: { FAKE_CLOUD_PORT: String(CLOUD_PORT), FAKE_CLOUD_DOWN_SITES: OFFLINE_SITE },
       reuseExistingServer: !process.env.CI,
     },
     {
@@ -61,5 +68,17 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
+    ...(
+      [
+        ["edge", EDGE_APP_PORT, EDGE_APP_URL, edgeAppEnv],
+        ["offline", OFFLINE_APP_PORT, OFFLINE_APP_URL, offlineAppEnv],
+      ] as const
+    ).map(([dir, port, url, env]) => ({
+      command: `rm -rf .evolve-cache/${dir} && mkdir -p .evolve-cache/${dir} && pnpm exec next start --port ${port}`,
+      url,
+      env,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    })),
   ],
 });

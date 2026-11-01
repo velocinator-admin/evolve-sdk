@@ -280,3 +280,56 @@ describe("fake cloud: sync webhooks", () => {
     expect(x.error).toBeTruthy();
   });
 });
+
+describe("test controls (T12.1a)", () => {
+  it("an outage drops that site's bearer requests and nothing else", async () => {
+    cloud.publish(content);
+    await fetch(`${cloud.url}/__control/outage`, {
+      method: "POST",
+      body: JSON.stringify({ site: TEST_SITE, down: true }),
+    });
+    await expect(
+      fetch(`${cloud.url}/v1/bundle`, { headers: { authorization: `Bearer ${TEST_SECRET_KEY}` } }),
+    ).rejects.toThrow();
+    expect((await fetch(`${cloud.url}/health`)).status).toBe(200);
+    cloud.down.delete(TEST_SITE);
+    const ok = await fetch(`${cloud.url}/v1/bundle`, {
+      headers: { authorization: `Bearer ${TEST_SECRET_KEY}` },
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it("signs preview tokens the SDK accepts", async () => {
+    const { verifyPreview } = await import("@next-evolve/protocol");
+    const res = await fetch(`${cloud.url}/__control/preview`, {
+      method: "POST",
+      body: JSON.stringify({ code: "ev_k3j9x2-c1d2e3" }),
+    });
+    const { token } = (await res.json()) as { token: string };
+    const keys = createKeyRing({ [TEST_KEY.kid]: TEST_KEY.publicKey });
+    expect(verifyPreview(token, { keys, site: TEST_SITE })).toMatchObject({
+      code: "ev_k3j9x2-c1d2e3",
+    });
+  });
+
+  it("aggregate() can reuse a delivery id and sign with an old timestamp", async () => {
+    const seen: { delivery: string | undefined; sig: string | undefined }[] = [];
+    const app = createServer((req, res) => {
+      seen.push({
+        delivery: req.headers["evolve-delivery"] as string,
+        sig: req.headers["evolve-signature"] as string,
+      });
+      res.writeHead(401).end();
+    });
+    await new Promise<void>((r) => app.listen(0, "127.0.0.1", r));
+    const port = (app.address() as { port: number }).port;
+    await cloud.aggregate(
+      `http://127.0.0.1:${port}`,
+      { experiments: [] },
+      { delivery: "d-1", t: 1000 },
+    );
+    app.close();
+    expect(seen[0]?.delivery).toBe("d-1");
+    expect(seen[0]?.sig).toMatch(/^t=1000,/);
+  });
+});

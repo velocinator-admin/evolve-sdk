@@ -49,6 +49,34 @@ export const syncAppEnv = {
   EVOLVE_CACHE_DIR: ".evolve-cache/sync",
 };
 
+/**
+ * Failure drills (spec §18 scenarios 9 and 12), each on its own instance and site
+ * so toggling the cloud or the clock never affects the other specs.
+ * - edge: a normal app; tests cut its site off the cloud and let bundles expire.
+ * - offline: boots with its site unreachable on the fake cloud (FAKE_CLOUD_DOWN_SITES)
+ *   and a customer DB URL that nothing listens on.
+ */
+export const EDGE_APP_PORT = 3102;
+export const EDGE_APP_URL = `http://localhost:${EDGE_APP_PORT}`;
+export const EDGE_SITE = "site_fakeedge01";
+export const OFFLINE_APP_PORT = 3103;
+export const OFFLINE_APP_URL = `http://localhost:${OFFLINE_APP_PORT}`;
+export const OFFLINE_SITE = "site_fakeoffl01";
+export const DEAD_DB_URL = "postgres://evolve:evolve@127.0.0.1:1/customer";
+
+export const edgeAppEnv = {
+  ...appEnv,
+  EVOLVE_SECRET_KEY: `evk_live_${EDGE_SITE}_${"E".repeat(32)}`,
+  EVOLVE_CACHE_DIR: ".evolve-cache/edge",
+};
+
+export const offlineAppEnv = {
+  ...appEnv,
+  EVOLVE_SECRET_KEY: `evk_live_${OFFLINE_SITE}_${"O".repeat(32)}`,
+  EVOLVE_DATABASE_URL: DEAD_DB_URL,
+  EVOLVE_CACHE_DIR: ".evolve-cache/offline",
+};
+
 /** Hero test on "/" (A = control, B = new headline) and a pricing CTA test. */
 export const M1_BUNDLE = {
   site: TEST_SITE,

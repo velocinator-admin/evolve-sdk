@@ -2,7 +2,8 @@
 import { startFakeCloud, TEST_PUBLIC_KEY_ENV, TEST_SECRET_KEY, TEST_WEBHOOK_SECRET } from "./index";
 
 const port = Number(process.env.FAKE_CLOUD_PORT ?? 4010);
-const cloud = await startFakeCloud({ port });
+const downSites = (process.env.FAKE_CLOUD_DOWN_SITES ?? "").split(",").filter(Boolean);
+const cloud = await startFakeCloud({ port, downSites });
 console.warn(`[fake-cloud] listening on ${cloud.url}
   EVOLVE_CLOUD_URL=${cloud.url}
   EVOLVE_SECRET_KEY=${TEST_SECRET_KEY}

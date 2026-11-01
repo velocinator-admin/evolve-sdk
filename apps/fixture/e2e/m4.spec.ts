@@ -124,3 +124,35 @@ test("a forged request is refused", async ({ request }) => {
   });
   expect(res.status()).toBe(401);
 });
+
+// Spec §18 scenario 11: stale and replayed requests are refused; the same
+// requestId twice gets the identical response and the query runs once.
+test("stale or replayed requests are refused; a repeated requestId is answered from the first run", async ({
+  request,
+}) => {
+  const send = async (data: Record<string, unknown>) => {
+    const res = await request.post(`${CLOUD_URL}/__control/aggregate`, {
+      data: { appUrl: APP_URL, ...data },
+    });
+    expect(res.ok()).toBe(true);
+    return (await res.json()) as Exchange & { request: { requestId: string; asOf: string } };
+  };
+  const req = { experiments, asOf: "2026-12-01T10:00:00.000Z" };
+  const delivery = `m4-replay-${Date.now()}`; // the app remembers delivery ids for 10 min
+
+  const stale = await send({ request: req, t: Math.floor(Date.now() / 1000) - 3600 });
+  expect(stale.status).toBe(401);
+
+  const first = await send({ request: req, delivery: delivery });
+  expect(first.status).toBe(200);
+  const replay = await send({ request: req, delivery: delivery });
+  expect(replay.status).toBe(409);
+
+  const again = await send({ request: { ...req, requestId: first.request.requestId } });
+  expect(again.status).toBe(200);
+  expect(again.verified).toBe(true);
+  expect(again.response).toEqual(first.response);
+  const runs = await sql`select 1 from evolve.aggregate_runs
+                         where request_id = ${first.request.requestId}`;
+  expect(runs).toHaveLength(1);
+});

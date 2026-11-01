@@ -41,17 +41,26 @@ test.describe("M1: hello variant from the proxy", () => {
     await ctx.close();
   });
 
-  test("new visitors are split across both variants", async ({ playwright, baseURL }) => {
-    const titles = new Map<string, number>();
-    for (let i = 0; i < 60; i++) {
-      const req = await playwright.request.newContext({ baseURL, userAgent: HUMAN_UA });
-      const html = await (await req.get("/")).text();
-      const title = /data-testid="hero-title">([^<]+)</.exec(html)?.[1] ?? "?";
-      titles.set(title, (titles.get(title) ?? 0) + 1);
-      await req.dispose();
-    }
-    expect([...titles.keys()].sort()).toEqual([A_TITLE, B_TITLE].sort());
-    for (const n of titles.values()) expect(n).toBeGreaterThan(10);
+  test("1,000 new visitors match the 50/50 weights (χ², p > 0.01)", async ({ baseURL }) => {
+    test.setTimeout(120_000);
+    const counts = new Map<string, number>();
+    const visit = async () => {
+      // Plain fetch: no cookie jar, so every request is a new visitor.
+      const res = await fetch(new URL("/", baseURL), { headers: { "user-agent": HUMAN_UA } });
+      const title = /data-testid="hero-title">([^<]+)</.exec(await res.text())?.[1] ?? "?";
+      counts.set(title, (counts.get(title) ?? 0) + 1);
+    };
+    const N = 1000;
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: 20 }, async () => {
+        while (next++ < N) await visit();
+      }),
+    );
+    expect([...counts.keys()].sort()).toEqual([A_TITLE, B_TITLE].sort());
+    const chi2 = [...counts.values()].reduce((s, o) => s + (o - N / 2) ** 2 / (N / 2), 0);
+    // 1 degree of freedom: p > 0.01 ⇔ χ² < 6.635.
+    expect(chi2, JSON.stringify(Object.fromEntries(counts))).toBeLessThan(6.635);
   });
 
   test("Googlebot gets control, no cookies, canonical /", async ({ playwright, baseURL }) => {
