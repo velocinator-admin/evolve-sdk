@@ -13,8 +13,8 @@ export type RuntimeOptions = {
   env?: Env;
 };
 
-/** Default cloud URL. The production domain is still open (decision D29), so it must be set for now. */
-export const DEFAULT_CLOUD_URL: string | undefined = undefined;
+/** Default cloud URL (decision D29). Override with EVOLVE_CLOUD_URL. */
+export const DEFAULT_CLOUD_URL: string | undefined = "https://api.evolveab.com";
 
 const REGISTRY = Symbol.for("next-evolve.stores");
 type Registry = Map<string, BundleStore>;
