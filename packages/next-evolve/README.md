@@ -1,137 +1,164 @@
 # next-evolve
 
-Self-improving Next.js sites: server-side variants with no flicker, measured in your own Postgres. Needs an Evolve Cloud account.
+A/B tests and bandits for Next.js App Router sites. Variants are chosen on the server, so there is no flicker. Raw events stay in your own Postgres; Evolve Cloud only receives aggregate counts and does the statistics.
 
-> Alpha.
+> Alpha. Needs an Evolve Cloud account (sign-up is invite-only for now). Without one the SDK serves your normal pages and records nothing; see [docs/without-an-account.md](docs/without-an-account.md).
 
-## Setup
+**Requirements:** Next.js 15.5 or newer with the App Router, Node 22.12 or newer, a Postgres 14+ database, and a host that runs a Node server (not `output: "export"`).
+
+## Quickstart (about 10 minutes)
+
+This gets you from an existing Next.js app to a running experiment in local development.
+
+### 1. Create a site
+
+Sign in at [app.evolveab.com](https://app.evolveab.com), enter a site name and click **Create site**. Copy the **secret key** (`evk_live_…`) and the **webhook secret** (`whsec_…`). They are shown only once. If you lose them, issue a new key on the site's **Connect** page.
+
+### 2. Get a Postgres database
+
+Evolve writes events into its own `evolve` schema, so your app's existing database is fine. For local development, Docker works:
 
 ```sh
-npx next-evolve init --routes "/ /pricing"   # add --dry-run to see the diff first
-npx next-evolve doctor                       # checks env, key, DB, bundle, proxy, pages, cloud → app
+docker run -d --name evolve-pg -e POSTGRES_PASSWORD=postgres -p 54329:5432 postgres:17
 ```
 
-`init` installs the package, connects to your site (secret key and webhook secret from the dashboard), sets up the database, and writes the config, route handler, proxy, layout script, instrumentation and `prebuild` hook. Static-mode pages move under `app/[evolve]/` and get wrapped with `withEvolve()`; when that isn't safe (a top-level `[slug]`, `force-dynamic`, a `"use client"` page…) the route stays in dynamic mode and `init` says why. It never overwrites your `.env.local` lines, and a re-run changes nothing. `--yes` skips every prompt.
+For production, any Postgres works (Neon, Supabase, RDS, your own). On serverless hosts use the pooled URL (for example Neon's `-pooler` host).
 
-Other commands: `migrate`, `pull`, `push`, `connect --test [--app-url]`, `aggregate`. The sections below describe what `init` writes.
+### 3. Run init
 
-## Database
-
-Raw events (exposures, goal events, identities) stay in **your** Postgres (≥ 14), in a separate `evolve` schema. Evolve Cloud only ever receives aggregate counts.
+In your app's directory:
 
 ```sh
-EVOLVE_DATABASE_URL=postgres://… npx next-evolve migrate
+npx next-evolve init \
+  --key evk_live_… \
+  --webhook-secret whsec_… \
+  --db postgres://postgres:postgres@localhost:54329/postgres \
+  --routes "/"
 ```
 
-Use the pooled URL on serverless hosts (e.g. Neon's `-pooler` host).
+`--routes` lists the pages you want to test (exact paths, e.g. `"/ /pricing"`). Add `--dry-run` first to see the diff without changing anything. `init` is safe to re-run.
 
-## Goals
+It installs `next-evolve` and `zod`, checks the key, migrates the database and writes:
 
-```ts
-// evolve.goals.ts
-import { defineGoals } from "next-evolve/config";
+| File                                    | What it is                                                                                                                        |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `evolve.config.ts`                      | The routes Evolve may test, and their mode                                                                                        |
+| `evolve.goals.ts`                       | What counts as success (a sample `signed_up` goal)                                                                                |
+| `app/api/evolve/[...evolve]/route.ts`   | The routes the beacon and the cloud call                                                                                          |
+| `proxy.ts` (`middleware.ts` on Next 15) | Picks a variant per visitor; no network call                                                                                      |
+| `instrumentation.ts`                    | Registers goals and sends your config to the cloud on startup                                                                     |
+| `app/layout.tsx`                        | Adds `<EvolveScript />`, the beacon                                                                                               |
+| `package.json`                          | `"prebuild": "next-evolve pull"`                                                                                                  |
+| `.env.local`                            | `EVOLVE_SECRET_KEY`, `EVOLVE_WEBHOOK_SECRET`, `EVOLVE_DATABASE_URL`, `EVOLVE_TRACK_SECRET` (never overwrites a line that's there) |
 
-export default defineGoals({
-  cta_click: { event: "cta_click", window: "1d" },
-  signup_page: { pageview: "/signup", window: "1d" },
-  paid: {
-    event: "subscription_started",
-    source: "stripe",
-    window: "30d",
-    value: (e) => e.props.amount as number,
-  },
+**Static or dynamic mode.** By default each tested page moves to `app/[evolve]/…` and is cached once per variant ("static mode"). `init` keeps a page where it is ("dynamic mode") when moving it isn't safe, and says why. If your `next.config` has `cacheComponents: true` (new `create-next-app` projects do), every route uses dynamic mode. See [docs/concepts.md](docs/concepts.md#static-and-dynamic-mode).
+
+If you already have a `proxy.ts`/`middleware.ts`, or `init` can't edit your layout, it prints the lines to add.
+
+### 4. Make a component optimizable
+
+Declare which props Evolve may change with a Zod schema, next to the component:
+
+```tsx
+// components/hero.tsx
+import { optimizable } from "next-evolve";
+import { z } from "zod";
+
+const heroSchema = z.object({
+  title: z.string().min(3).max(60),
+  cta: z.string().min(2).max(24),
 });
-```
 
-Function values run in your app when the event is written; only `{ kind: "local-fn" }` is sent to the cloud.
-
-## Routes and beacon
-
-```ts
-// app/api/evolve/[...evolve]/route.ts
-import { createEvolveHandler } from "next-evolve/server";
-import evolveConfig from "@/evolve.config";
-import goals from "@/evolve.goals";
-
-export const { GET, POST } = createEvolveHandler({ config: evolveConfig, goals });
-export const maxDuration = 60;
-```
-
-Put `<EvolveScript />` (from `next-evolve/client`) in the root layout. It sends page views, exposures and clicks on `[data-evolve-goal]` elements (forms: on submit) to `/api/evolve/collect` on your own origin.
-
-## Tracking
-
-```ts
-import { evolve } from "next-evolve/server";
-
-await evolve.track("project_created", { userId: user.id });
-await evolve.identify(user.id); // links the visitor's evolve_id cookie; first link wins
-```
-
-In the browser: `import { track, identify } from "next-evolve/client"`.
-
-### Server-to-server events
-
-`POST /api/evolve/track` with `Authorization: Bearer $EVOLVE_TRACK_SECRET` and `{ "events": [{ "name", "userId"?, "anonId"?, "value"?, "props"?, "source"?, "ts"?, "dedupeKey"? }] }` (≤ 500 events). Unset secret → 404; wrong bearer → 401.
-
-### Stripe recipe
-
-Call `evolve.track` from your own Stripe webhook handler, after you verify the signature:
-
-```ts
-// app/api/stripe/route.ts
-import { evolve } from "next-evolve/server";
-
-if (event.type === "invoice.paid") {
-  const invoice = event.data.object;
-  await evolve.track("subscription_started", {
-    userId: invoice.metadata.userId,
-    source: "stripe",
-    props: { amount: invoice.amount_paid / 100 },
-    dedupeKey: event.id, // Stripe retries: stored once
-  });
+function Hero({ title, cta }: z.infer<typeof heroSchema>) {
+  return (
+    <section>
+      <h1>{title}</h1>
+      <a href="/signup" data-evolve-goal="signup">
+        {cta}
+      </a>
+    </section>
+  );
 }
+
+export default optimizable(Hero, heroSchema);
 ```
 
-## Aggregation
+Render it with `<Optimizable>` on a tested page. The props you pass are the control:
 
-Evolve Cloud never reads your database. It sends a signed request to `POST /api/evolve/aggregate` (verified with `EVOLVE_WEBHOOK_SECRET`), and your app answers with counts and sums per experiment × variant × goal × day, signed with the same secret. No visitor or user ids leave your app. Set `EVOLVE_SECRET_KEY`, `EVOLVE_WEBHOOK_SECRET` and `EVOLVE_DATABASE_URL`; the route needs `maxDuration = 60`.
+```tsx
+import { Optimizable } from "next-evolve";
+import Hero from "@/components/hero";
 
-In local development the cloud can't reach `localhost`. Run the same request yourself:
+<Optimizable id="hero" component={Hero} props={{ title: "Ship faster", cta: "Start free" }} />;
+```
+
+With `cacheComponents: true`, wrap it in `<Suspense>` (from `react`); without it, `next build` fails with "uncached or runtime data … outside of `<Suspense>`":
+
+```tsx
+<Suspense>
+  <Optimizable id="hero" component={Hero} props={{ title: "Ship faster", cta: "Start free" }} />
+</Suspense>;
+```
+
+`data-evolve-goal="signup"` fires the `signup` event on click (forms: on submit). The sample goal `signed_up` in `evolve.goals.ts` counts that event.
+
+### 5. Start the app and open the page
 
 ```sh
-npx next-evolve aggregate           # print the statistics
-npx next-evolve aggregate --upload  # and send them to Evolve Cloud
+npm run dev
 ```
 
-## Sync
+Open the page once. The region registers with the cloud and shows up under **Regions** in the dashboard within a few seconds.
 
-Your app keeps a signed copy of its configuration (the bundle) in memory and serves from it with no network call on the request path. It gets new bundles three ways:
+### 6. Create and start an experiment
 
-- **Polling:** every 60 s (5 s in dev), in the background.
-- **Webhook:** when you change an experiment, Evolve Cloud calls `POST /api/evolve/sync` (signed with `EVOLVE_WEBHOOK_SECRET`). The receiving instance pulls the new bundle within seconds. The webhook carries no configuration, so a forged call can at most cause one extra fetch.
-- **Build time:** add `"prebuild": "next-evolve pull"` to `package.json` and pass the result to the proxy, so a fresh instance serves the last bundle before its first fetch:
+In the dashboard: **Regions → hero → New experiment**. Give it a name, change a prop for "Variant B" (for example the title), click **Save draft**, then **Start**.
 
-```ts
-// proxy.ts
-import { createEvolveProxy } from "next-evolve/proxy";
-import buildBundle from "./.evolve/bundle.generated";
-import evolveConfig from "./evolve.config";
+The dev server picks up the change within about 5 seconds (60 seconds in production, or at once through the sync webhook once deployed).
 
-export const proxy = createEvolveProxy(evolveConfig, { buildBundle });
+### 7. See the variant and the exposure
+
+Open the page in a private window: you get Control or Variant B (50/50) and keep it on reloads. Each new private window is a new visitor. The experiment page also has **Preview** links that force a variant without counting anything.
+
+The exposure is written to your database:
+
+```sh
+docker exec evolve-pg psql -U postgres -c "select * from evolve.exposures"
 ```
 
-Add `.evolve/` to `.gitignore`. `pull` never fails the build: without a key or a reachable cloud it keeps the previous bundle or writes an empty one.
+### 8. See it in the dashboard
 
-**Long-running Node (`next start`, Docker):** call `registerEvolve()` from `instrumentation.ts`. It polls in the background and keeps the last bundle on disk (`os.tmpdir()`, or `EVOLVE_CACHE_DIR`), so a restart serves it even when the cloud is unreachable.
+The cloud can't reach `localhost`, so in development you run the aggregation yourself. Aggregates only count data older than 2 minutes, so wait 2 minutes after the visit, then:
 
-**Vercel + Global Config (recommended on Vercel):** without it, a webhook reaches only the instance that receives it and the others catch up within 60 s. With a [Global Config](https://vercel.com/docs/edge-config) store, the sync route writes the bundle there and every instance picks it up within ~10 s. Set:
+```sh
+npx next-evolve aggregate --upload
+```
 
-| Var                       | Purpose                                 |
-| ------------------------- | --------------------------------------- |
-| `EVOLVE_GLOBAL_CONFIG`    | The store's connection string (read)    |
-| `EVOLVE_GLOBAL_CONFIG_ID` | The store id (`ecfg_…`), for writes     |
-| `EVOLVE_VERCEL_API_TOKEN` | A Vercel token that can write the store |
-| `EVOLVE_VERCEL_TEAM_ID`   | Optional, for team-owned stores         |
+The experiment page shows the visitor under **Results**. Once deployed, the cloud runs this on a schedule and you don't need the command.
 
-Bundles read from Global Config are verified like any other. With an existing proxy that calls `applyEvolve`, `await evolveReady(evolveConfig)` first (a fresh instance waits ≤ 20 ms for one read).
+### 9. Deploy
+
+Set the four `EVOLVE_*` variables from `.env.local` in your host's production environment, deploy, then tell the cloud where the app lives and test the connection:
+
+```sh
+npx next-evolve connect --test --app-url https://your-app.com
+npx next-evolve doctor
+```
+
+More in [docs/production.md](docs/production.md).
+
+## Docs
+
+- [Concepts](docs/concepts.md): regions, variants, experiments, the bundle, static vs dynamic mode, cookies, bots
+- [API reference](docs/api.md): components, functions, CLI, HTTP routes
+- [Goals and attribution](docs/goals-and-attribution.md): defining goals, tracking events, how conversions are attributed
+- [Stripe recipe](docs/stripe.md): count paid subscriptions as a goal
+- [Going to production](docs/production.md): env, app URL, hosting (Vercel, Docker, Node), sync, firewalls
+- [What leaves your server](docs/what-leaves-your-server.md): every call the SDK makes, and what's in it
+- [Without an account](docs/without-an-account.md): what the SDK does when there's no cloud
+- [Configuration and environment variables](docs/configuration.md)
+- [Troubleshooting](docs/troubleshooting.md)
+
+## License
+
+MIT
