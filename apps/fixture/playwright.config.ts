@@ -13,6 +13,9 @@ import {
   OFFLINE_APP_URL,
   OFFLINE_SITE,
   offlineAppEnv,
+  PRODKEY_APP_PORT,
+  PRODKEY_APP_URL,
+  prodkeyAppEnv,
   SYNC_APP_PORT,
   SYNC_APP_URL,
   syncAppEnv,
@@ -72,6 +75,7 @@ export default defineConfig({
       [
         ["edge", EDGE_APP_PORT, EDGE_APP_URL, edgeAppEnv],
         ["offline", OFFLINE_APP_PORT, OFFLINE_APP_URL, offlineAppEnv],
+        ["prodkey", PRODKEY_APP_PORT, PRODKEY_APP_URL, prodkeyAppEnv],
       ] as const
     ).map(([dir, port, url, env]) => ({
       command: `rm -rf .evolve-cache/${dir} && mkdir -p .evolve-cache/${dir} && pnpm exec next start --port ${port}`,

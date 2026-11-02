@@ -136,3 +136,17 @@ export const M1_BUNDLE = {
     },
   },
 };
+
+/**
+ * T12.5: a production build (`next start`) given the test public key WITHOUT
+ * EVOLVE_UNSAFE_ALLOW_TEST_KEY. It must reject every bundle the fake cloud signs.
+ */
+export const PRODKEY_APP_PORT = 3106;
+export const PRODKEY_APP_URL = `http://localhost:${PRODKEY_APP_PORT}`;
+export const PRODKEY_SITE = "site_fakeprodk1";
+const { EVOLVE_UNSAFE_ALLOW_TEST_KEY: _allow, ...withoutOptIn } = appEnv;
+export const prodkeyAppEnv = {
+  ...withoutOptIn,
+  EVOLVE_SECRET_KEY: `evk_live_${PRODKEY_SITE}_${"P".repeat(32)}`,
+  EVOLVE_CACHE_DIR: ".evolve-cache/prodkey",
+};

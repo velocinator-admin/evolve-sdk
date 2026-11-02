@@ -1,5 +1,6 @@
 // POST /api/evolve/aggregate (spec §9.2–9.5): the cloud asks, the app answers
 // with sufficient statistics computed in its own DB, signed with the webhook secret.
+import { createHash } from "node:crypto";
 import {
   aggregateRequestSchema,
   createReplayGuard,
@@ -37,6 +38,22 @@ export function sharedReplayGuard(): ReplayGuard {
   return g[KEY];
 }
 
+/**
+ * True when a verified call is new: its delivery id and its signed message
+ * (`t` + body) are both unseen. The delivery id isn't covered by the
+ * signature, so checking it alone would let a captured call be replayed under
+ * a fresh id within the signature window (T12.5).
+ */
+export function firstDelivery(
+  guard: ReplayGuard,
+  delivery: string | null,
+  t: number,
+  body: string,
+): boolean {
+  if (!delivery || !guard.check(delivery)) return false;
+  return guard.check(`msg:${t}:${createHash("sha256").update(body).digest("base64url")}`);
+}
+
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers });
 
@@ -53,8 +70,8 @@ export async function handleAggregate(req: Request, deps: AggregateRouteDeps): P
     now: Math.floor(now() / 1000),
   });
   if (!sig.ok) return json(401, { error: "invalid_signature", reason: sig.reason });
-  const delivery = req.headers.get(DELIVERY_HEADER) ?? "";
-  if (!(deps.replay ?? sharedReplayGuard()).check(delivery)) {
+  const guard = deps.replay ?? sharedReplayGuard();
+  if (!firstDelivery(guard, req.headers.get(DELIVERY_HEADER), sig.t, body)) {
     return json(409, { error: "replayed" });
   }
 

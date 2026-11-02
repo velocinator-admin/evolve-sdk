@@ -152,6 +152,50 @@ describe("POST /api/evolve/sync", () => {
     expect(s.fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("T12.5: a captured call replayed under a fresh delivery id is rejected", async () => {
+    const s = setup();
+    const text = JSON.stringify(updated(2));
+    const signature = signBody(SECRET, text, T0 / 1000);
+    const send = (delivery: string) =>
+      handleSync(
+        new Request("http://app.test/api/evolve/sync", {
+          method: "POST",
+          headers: { "evolve-signature": signature, "evolve-delivery": delivery },
+          body: text,
+        }),
+        s.deps,
+      );
+    expect((await send("first")).status).toBe(202);
+    s.advance(1000);
+    // The delivery id isn't signed; the signed message (t + body) is what's replayed.
+    expect((await send("second")).status).toBe(409);
+    await s.settle();
+    expect(s.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("T12.5: missing or malformed signatures, future timestamps, tampered bodies and missing delivery ids", async () => {
+    const s = setup();
+    const text = JSON.stringify(updated(2));
+    const send = (headers: Record<string, string>, body = text) =>
+      handleSync(
+        new Request("http://app.test/api/evolve/sync", { method: "POST", headers, body }),
+        s.deps,
+      );
+    const sig = (t = T0 / 1000, b = text) => signBody(SECRET, b, t);
+    expect((await send({ "evolve-delivery": "a" })).status).toBe(401);
+    expect((await send({ "evolve-signature": "v1=abc", "evolve-delivery": "b" })).status).toBe(401);
+    const future = await send({ "evolve-signature": sig(T0 / 1000 + 301), "evolve-delivery": "c" });
+    expect(future.status).toBe(401);
+    expect(await future.json()).toMatchObject({ reason: "stale" });
+    const tampered = JSON.stringify(updated(99));
+    expect(
+      (await send({ "evolve-signature": sig(), "evolve-delivery": "d" }, tampered)).status,
+    ).toBe(401);
+    expect((await send({ "evolve-signature": sig() })).status).toBe(409);
+    await s.settle();
+    expect(s.fetcher).not.toHaveBeenCalled();
+  });
+
   it("rejects other sites, unsupported pv, bad JSON and missing config", async () => {
     const s = setup();
     expect((await handleSync(req({ ...updated(2), site: "site_other00000" }), s.deps)).status).toBe(

@@ -15,7 +15,7 @@ import {
 } from "@next-evolve/protocol";
 import { logRateLimited } from "../core/log";
 import type { BundleStore } from "../store/memory";
-import { sharedReplayGuard } from "./aggregate-route";
+import { firstDelivery, sharedReplayGuard } from "./aggregate-route";
 
 type Env = Record<string, string | undefined>;
 
@@ -63,7 +63,8 @@ export async function handleSync(req: Request, deps: SyncDeps): Promise<Response
     now: Math.floor(now() / 1000),
   });
   if (!sig.ok) return json(401, { error: "invalid_signature", reason: sig.reason });
-  if (!(deps.replay ?? sharedReplayGuard()).check(req.headers.get(DELIVERY_HEADER) ?? "")) {
+  const guard = deps.replay ?? sharedReplayGuard();
+  if (!firstDelivery(guard, req.headers.get(DELIVERY_HEADER), sig.t, body)) {
     return json(409, { error: "replayed" });
   }
 

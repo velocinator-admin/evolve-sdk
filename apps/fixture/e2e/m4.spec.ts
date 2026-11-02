@@ -143,12 +143,16 @@ test("stale or replayed requests are refused; a repeated requestId is answered f
   const stale = await send({ request: req, t: Math.floor(Date.now() / 1000) - 3600 });
   expect(stale.status).toBe(401);
 
-  const first = await send({ request: req, delivery: delivery });
+  const t = Math.floor(Date.now() / 1000);
+  const first = await send({ request: req, delivery: delivery, t });
   expect(first.status).toBe(200);
-  const replay = await send({ request: req, delivery: delivery });
+  const replay = await send({ request: req, delivery: delivery, t });
   expect(replay.status).toBe(409);
+  // T12.5: the same signed message under a fresh delivery id is a replay too.
+  const resent = await send({ request: { ...req, requestId: first.request.requestId }, t });
+  expect(resent.status).toBe(409);
 
-  const again = await send({ request: { ...req, requestId: first.request.requestId } });
+  const again = await send({ request: { ...req, requestId: first.request.requestId }, t: t + 1 });
   expect(again.status).toBe(200);
   expect(again.verified).toBe(true);
   expect(again.response).toEqual(first.response);

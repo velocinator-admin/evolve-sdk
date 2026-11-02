@@ -258,3 +258,52 @@ describe("POST /api/evolve/aggregate", () => {
     expect(await status(post(request()), deps({ sql: () => null }))).toBe(503);
   });
 });
+
+describe("POST /api/evolve/aggregate: replay (T12.5)", () => {
+  it("a captured request replayed under a fresh delivery id is rejected", async () => {
+    const d = deps();
+    const text = JSON.stringify(request());
+    const signature = signBody(SECRET, text);
+    const send = (delivery: string) =>
+      handleAggregate(
+        new Request("http://app.test/api/evolve/aggregate", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "evolve-signature": signature,
+            "evolve-delivery": delivery,
+          },
+          body: text,
+        }),
+        d,
+      );
+    expect((await send("first")).status).toBe(200);
+    expect((await send("second")).status).toBe(409);
+  });
+
+  it("future timestamps, tampered bodies, missing signature or delivery are rejected", async () => {
+    const d = deps();
+    const text = JSON.stringify(request());
+    const send = (headers: Record<string, string>, body = text) =>
+      handleAggregate(
+        new Request("http://app.test/api/evolve/aggregate", { method: "POST", headers, body }),
+        d,
+      );
+    const now = Math.floor(Date.now() / 1000);
+    expect((await send({ "evolve-delivery": "a" })).status).toBe(401);
+    expect(
+      (
+        await send({
+          "evolve-signature": signBody(SECRET, text, now + 301),
+          "evolve-delivery": "b",
+        })
+      ).status,
+    ).toBe(401);
+    const tampered = JSON.stringify({ ...request(), mode: "full" });
+    expect(
+      (await send({ "evolve-signature": signBody(SECRET, text), "evolve-delivery": "c" }, tampered))
+        .status,
+    ).toBe(401);
+    expect((await send({ "evolve-signature": signBody(SECRET, text) })).status).toBe(409);
+  });
+});
