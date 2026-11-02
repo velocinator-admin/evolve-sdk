@@ -19,7 +19,7 @@ Sign in at [app.evolveab.com](https://app.evolveab.com), enter a site name and c
 Evolve writes events into its own `evolve` schema, so your app's existing database is fine. For local development, Docker works:
 
 ```sh
-docker run -d --name evolve-pg -e POSTGRES_PASSWORD=postgres -p 54329:5432 postgres:17
+docker run -d --name evolve-pg -e POSTGRES_PASSWORD=postgres -p 54320:5432 postgres:17
 ```
 
 For production, any Postgres works (Neon, Supabase, RDS, your own). On serverless hosts use the pooled URL (for example Neon's `-pooler` host).
@@ -32,7 +32,7 @@ In your app's directory:
 npx next-evolve init \
   --key evk_live_… \
   --webhook-secret whsec_… \
-  --db postgres://postgres:postgres@localhost:54329/postgres \
+  --db postgres://postgres:postgres@localhost:54320/postgres \
   --routes "/"
 ```
 

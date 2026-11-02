@@ -18,11 +18,13 @@ vi.mock("./render-bundle", () => ({
 vi.mock("next/navigation", () => ({ unstable_rethrow: () => {} }));
 const afterCalls: (() => unknown)[] = [];
 const afterImpl = { throws: false };
+const connection = vi.fn(async () => {});
 vi.mock("next/server", () => ({
   after: (fn: () => unknown) => {
     if (afterImpl.throws) throw new Error("outside a request scope");
     afterCalls.push(fn);
   },
+  connection: () => connection(),
 }));
 const registerRegion = vi.fn(async (_r: unknown) => {});
 vi.mock("../cloud/regions", () => ({ registerRegion: (r: unknown) => registerRegion(r) }));
@@ -137,10 +139,28 @@ describe("<Optimizable>", () => {
     expect(props).toEqual(controlOut);
   });
 
-  it("dynamic mode reads the x-evolve-a header", async () => {
+  it("dynamic mode reads the x-evolve-a header and awaits connection() before the bundle read", async () => {
+    connection.mockClear();
+    let connectedBeforeRead = false;
+    getRenderBundle.mockImplementationOnce(async () => {
+      connectedBeforeRead = connection.mock.calls.length === 1;
+      return bundles[0]!;
+    });
     headerCode.value = "ev_k3j9x2-c1d2e3";
     const [, props] = inspect(await render());
     expect(props.title).toBe("Ship 10x faster");
+    // cacheComponents flags the bundle store's clock read during prerender otherwise.
+    expect(connectedBeforeRead).toBe(true);
+  });
+
+  it("static mode (withEvolve context) and ev_0 never call connection(), so pages stay cacheable", async () => {
+    connection.mockClear();
+    ctx.code = "ev_k3j9x2-c1d2e3";
+    await render();
+    headerCode.value = "ev_0";
+    ctx.code = null;
+    await render();
+    expect(connection).not.toHaveBeenCalled();
   });
 
   it("no context → control, one dev warning", async () => {

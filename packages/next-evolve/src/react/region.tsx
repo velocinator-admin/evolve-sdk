@@ -1,7 +1,7 @@
 import { type BundlePayload, CONTROL_CODE, type CodePair, decodeCode } from "@next-evolve/protocol";
 import { headers } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
-import { after } from "next/server";
+import { after, connection } from "next/server";
 import { createElement, type ReactElement } from "react";
 import type { z } from "zod";
 import { registerRegion } from "../cloud/regions";
@@ -141,6 +141,11 @@ export async function Optimizable<P extends object, S extends z.ZodObject>({
   if (code === CONTROL_CODE) return control();
   const pairs = decodeCode(code);
   if (!pairs || pairs.length === 0) return control();
+  // Dynamic mode (the code came from the proxy's header): the bundle read
+  // below checks the clock. With cacheComponents, Next only allows that at
+  // request time, so say so. The route is dynamic already; static mode
+  // (withEvolve context) stays cacheable.
+  if (!requestContext().code) await connection();
 
   let bundle = await getRenderBundle();
   let hit = findPair(bundle, pairs, id);
