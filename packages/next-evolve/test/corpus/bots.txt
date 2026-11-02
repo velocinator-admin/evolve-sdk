@@ -28,3 +28,4 @@ Go-http-client/1.1
 Wget/1.21.4
 node-fetch/1.0 (+https://github.com/bitinn/node-fetch)
 Vercelbot/0.1 (+https://vercel.com)
+EvolveBot/1.0 (+https://evolveab.com/bot)
