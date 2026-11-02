@@ -19,6 +19,10 @@ on:
         description: "Pack and dry-run publish only"
         type: boolean
         default: true
+      tag_alpha_only:
+        description: "Only point the alpha dist-tag at the current versions (no publish)"
+        type: boolean
+        default: false
 
 concurrency: release-${{ github.ref }}
 
@@ -60,7 +64,8 @@ jobs:
           pnpm -r --filter='./packages/*' publish --dry-run --no-git-checks --access public
 
       - name: Version PR or publish
-        if: github.event_name == 'push' || !inputs.dry_run
+        id: changesets
+        if: github.event_name == 'push' || (!inputs.dry_run && !inputs.tag_alpha_only)
         uses: changesets/action@v1
         with:
           publish: pnpm release
@@ -68,3 +73,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: false
+
+      # Phase 1 alpha (T12.8): every release is both `latest` (changeset publish's
+      # default, so `npx next-evolve init` works) and `alpha`. dist-tag isn't covered
+      # by npm's own OIDC support, so exchange the OIDC token per package and call
+      # the registry's dist-tag API directly. If npm refuses, the log says so and
+      # the fallback is `npm dist-tag add <pkg>@<ver> alpha` from a logged-in shell.
+      - name: Tag alpha
+        if: steps.changesets.outputs.published == 'true' || inputs.tag_alpha_only
+        continue-on-error: true
+        run: |
+          oidc=$(curl -sf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)
+          status=0
+          for dir in packages/next-evolve packages/protocol; do
+            name=$(jq -r .name $dir/package.json); ver=$(jq -r .version $dir/package.json)
+            enc=$(jq -rn --arg n "$name" '$n|@uri')
+            token=$(curl -sf -X POST -H "Authorization: Bearer $oidc" \
+              "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/$enc" | jq -r .token)
+            code=$(curl -s -o /tmp/out -w '%{http_code}' -X PUT \
+              -H "Authorization: Bearer $token" -H "content-type: application/json" \
+              --data "\"$ver\"" "https://registry.npmjs.org/-/package/$enc/dist-tags/alpha")
+            echo "$name@$ver alpha: HTTP $code $(cat /tmp/out)"
+            [ "$code" = 200 ] || [ "$code" = 201 ] || status=1
+          done
+          npm view next-evolve dist-tags; npm view @next-evolve/protocol dist-tags
+          exit $status
