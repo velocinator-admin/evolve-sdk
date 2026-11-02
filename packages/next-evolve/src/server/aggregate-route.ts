@@ -50,7 +50,11 @@ export function firstDelivery(
   t: number,
   body: string,
 ): boolean {
-  if (!delivery || !guard.check(delivery)) return false;
+  return !!delivery && guard.check(delivery) && firstMessage(guard, t, body);
+}
+
+/** True the first time this signed message (`t` + body) is seen in the replay window. */
+export function firstMessage(guard: ReplayGuard, t: number, body: string): boolean {
   return guard.check(`msg:${t}:${createHash("sha256").update(body).digest("base64url")}`);
 }
 

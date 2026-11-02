@@ -15,7 +15,7 @@ import {
 } from "@next-evolve/protocol";
 import { logRateLimited } from "../core/log";
 import type { BundleStore } from "../store/memory";
-import { firstDelivery, sharedReplayGuard } from "./aggregate-route";
+import { firstMessage, sharedReplayGuard } from "./aggregate-route";
 
 type Env = Record<string, string | undefined>;
 
@@ -64,9 +64,8 @@ export async function handleSync(req: Request, deps: SyncDeps): Promise<Response
   });
   if (!sig.ok) return json(401, { error: "invalid_signature", reason: sig.reason });
   const guard = deps.replay ?? sharedReplayGuard();
-  if (!firstDelivery(guard, req.headers.get(DELIVERY_HEADER), sig.t, body)) {
-    return json(409, { error: "replayed" });
-  }
+  const delivery = req.headers.get(DELIVERY_HEADER);
+  if (!delivery || !guard.check(delivery)) return json(409, { error: "replayed" });
 
   let parsed: unknown;
   try {
@@ -89,6 +88,10 @@ export async function handleSync(req: Request, deps: SyncDeps): Promise<Response
     });
   }
   if (r.data.site !== site) return json(403, { error: "site_mismatch" });
+  // The delivery id isn't signed: refuse the same signed message under a new
+  // one (T12.5). Pings are exempt: their body is constant, so two in the same
+  // second would collide, and a replayed ping changes nothing.
+  if (!firstMessage(guard, sig.t, body)) return json(409, { error: "replayed" });
   const newer =
     !current ||
     r.data.ver > current.ver ||

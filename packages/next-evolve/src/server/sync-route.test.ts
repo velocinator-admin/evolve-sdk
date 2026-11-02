@@ -173,6 +173,13 @@ describe("POST /api/evolve/sync", () => {
     expect(s.fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("T12.5: two identical pings in the same second both answer (a ping changes nothing)", async () => {
+    const s = setup();
+    const ping = { pv: 1, type: "ping" };
+    expect((await handleSync(req(ping), s.deps)).status).toBe(202);
+    expect((await handleSync(req(ping), s.deps)).status).toBe(202);
+  });
+
   it("T12.5: missing or malformed signatures, future timestamps, tampered bodies and missing delivery ids", async () => {
     const s = setup();
     const text = JSON.stringify(updated(2));
