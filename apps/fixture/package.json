@@ -9,7 +9,8 @@
     "start": "next start --port 3100",
     "typecheck": "next typegen && tsc --noEmit",
     "test:e2e": "playwright test",
-    "check:server-only": "node test/check-server-only.mjs"
+    "check:server-only": "node test/check-server-only.mjs",
+    "perf": "node --experimental-strip-types --no-warnings scripts/perf.ts"
   },
   "dependencies": {
     "next": "16.4.3",

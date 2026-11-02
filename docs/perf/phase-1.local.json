@@ -1,0 +1,138 @@
+{
+  "at": "2026-11-02T00:24:20.713Z",
+  "mode": "local next start",
+  "node": "v22.13.1",
+  "requests": 2000,
+  "warmup": 200,
+  "scenarios": [
+    {
+      "name": "/ static, returning visitor",
+      "target": "/ev_k3j9x2-a8f2l1",
+      "with": {
+        "p50": 0.772,
+        "p95": 1.119,
+        "p99": 1.518
+      },
+      "without": {
+        "p50": 0.461,
+        "p95": 0.67,
+        "p99": 0.979
+      },
+      "addedP50": 0.311,
+      "addedP95": 0.449,
+      "serverTiming": {
+        "p50": 0.026,
+        "p95": 0.043,
+        "p99": 0.067
+      },
+      "errors": 0
+    },
+    {
+      "name": "/ static, new visitor",
+      "target": "/ev_k3j9x2-a8f2l1",
+      "with": {
+        "p50": 0.684,
+        "p95": 1.089,
+        "p99": 1.488
+      },
+      "without": {
+        "p50": 0.374,
+        "p95": 0.606,
+        "p99": 0.887
+      },
+      "addedP50": 0.31,
+      "addedP95": 0.483,
+      "serverTiming": {
+        "p50": 0.054,
+        "p95": 0.094,
+        "p99": 0.146
+      },
+      "errors": 0
+    },
+    {
+      "name": "/pricing static, returning visitor",
+      "target": "/ev_p7q8r9-s4t5u6/pricing",
+      "with": {
+        "p50": 0.666,
+        "p95": 1.643,
+        "p99": 2.951
+      },
+      "without": {
+        "p50": 0.448,
+        "p95": 1.121,
+        "p99": 1.812
+      },
+      "addedP50": 0.218,
+      "addedP95": 0.522,
+      "serverTiming": {
+        "p50": 0.024,
+        "p95": 0.075,
+        "p99": 0.129
+      },
+      "errors": 0
+    },
+    {
+      "name": "/features dynamic, returning visitor",
+      "target": "/features",
+      "with": {
+        "p50": 2.664,
+        "p95": 4.025,
+        "p99": 4.958
+      },
+      "without": {
+        "p50": 2.199,
+        "p95": 3.437,
+        "p99": 4.277
+      },
+      "addedP50": 0.465,
+      "addedP95": 0.588,
+      "serverTiming": {
+        "p50": 0.063,
+        "p95": 0.112,
+        "p99": 0.147
+      },
+      "errors": 0
+    },
+    {
+      "name": "/ static, bot",
+      "target": "/ev_0",
+      "with": {
+        "p50": 0.594,
+        "p95": 1.331,
+        "p99": 2.012
+      },
+      "without": {
+        "p50": 0.406,
+        "p95": 0.872,
+        "p99": 1.54
+      },
+      "addedP50": 0.188,
+      "addedP95": 0.459,
+      "serverTiming": {
+        "p50": 0.013,
+        "p95": 0.039,
+        "p99": 0.071
+      },
+      "errors": 0
+    }
+  ],
+  "load": {
+    "concurrency": 16,
+    "with": {
+      "rps": 727,
+      "ttfb": {
+        "p50": 8.676,
+        "p95": 64.019,
+        "p99": 88.776
+      }
+    },
+    "without": {
+      "rps": 650,
+      "ttfb": {
+        "p50": 21.383,
+        "p95": 45.957,
+        "p99": 63.741
+      }
+    }
+  }
+}

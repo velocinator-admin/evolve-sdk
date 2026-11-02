@@ -4,6 +4,7 @@ node_modules/
 !.env.example
 dist/
 .next/
+.next-baseline/
 .turbo/
 coverage/
 *.tsbuildinfo
