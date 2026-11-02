@@ -97,6 +97,35 @@ describe("failure matrix (spec §7.9)", () => {
     expect(visit(store)).toEqual({ path: "/ev_0", cookies: "" });
   });
 
+  // T12.6: "disconnected" (key revoked, site removed) is the same as an outage
+  // for serving: the cloud answers 401, the last bundle serves until it
+  // expires, then control. No instant kill switch from the cloud.
+  it("disconnected (key revoked → 401) → the last bundle until it expires, then control", async () => {
+    cloud!.publish({ site: TEST_SITE, routing: routing(1), variants });
+    let key = TEST_SECRET_KEY;
+    const store = createMemoryStore({
+      site: TEST_SITE,
+      keys,
+      pollMs: 60_000,
+      now: () => t,
+      random: () => 0.5,
+      fetcher: (etag) => fetchBundle({ cloudUrl: cloud!.url, secretKey: key, etag }),
+    });
+    await store.refresh();
+    expect(servesB(store)).toBe(true);
+    key = "evk_revoked"; // the cloud answers 401 invalid_key, as for a revoked key
+    expect(await fetchBundle({ cloudUrl: cloud!.url, secretKey: key })).toMatchObject({
+      status: "error",
+      code: 401,
+    });
+    t += 13 * DAY;
+    await store.refresh();
+    expect(servesB(store)).toBe(true);
+    t += BUNDLE_TTL_SECONDS * 1000 - 13 * DAY + 1000;
+    await store.refresh();
+    expect(visit(store)).toEqual({ path: "/ev_0", cookies: "" });
+  });
+
   it("webhook unreachable → converges by polling within 60 s", async () => {
     cloud!.publish({ site: TEST_SITE, routing: routing(0), variants });
     const store = appStore();

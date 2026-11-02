@@ -9,6 +9,7 @@ import {
   M1_BUNDLE,
   OFFLINE_APP_URL,
   OFFLINE_SITE,
+  TRACK_SECRET,
 } from "./env";
 
 // Spec §18 scenarios 9 and 12 (failure matrix §7.9) on real `next start` apps.
@@ -127,6 +128,34 @@ test.describe("scenario 9: the cloud is unreachable", () => {
         const v = await visit(EDGE_APP_URL, "evolve_a=k3j9x2:c1d2e3");
         expect(v).toMatchObject({ status: 200, title: A_TITLE, assigned: false, marked: false });
       }
+
+      // T12.6, §7.9 "events keep being written locally": a returning visitor's
+      // browser events and server-side track calls still land in the customer DB.
+      // (New visitors get no cookies under control, so their browser events aren't recorded.)
+      const anon = `exp${Date.now().toString(36)}`.padEnd(22, "x").slice(0, 22);
+      const collect = await request.post(`${EDGE_APP_URL}/api/evolve/collect`, {
+        headers: { origin: EDGE_APP_URL, cookie: `evolve_id=${anon}`, "user-agent": HUMAN_UA },
+        data: JSON.stringify({ v: 1, events: [{ t: "ev", n: "cta_click", p: "/" }] }),
+      });
+      expect(collect.status()).toBe(204);
+      const dedupe = `expired-${anon}`;
+      const track = await request.post(`${EDGE_APP_URL}/api/evolve/track`, {
+        headers: { authorization: `Bearer ${TRACK_SECRET}` },
+        data: {
+          events: [{ name: "subscription_started", userId: "user:expired", dedupeKey: dedupe }],
+        },
+      });
+      expect(track.status()).toBe(200);
+      await expect
+        .poll(
+          async () =>
+            (
+              await sql`select name from evolve.events
+                where anon_id = ${anon} or dedupe_key = ${dedupe} order by name`
+            ).map((r) => r.name),
+          { timeout: 10_000 },
+        )
+        .toEqual(["cta_click", "subscription_started"]);
     } finally {
       await outage(request, EDGE_SITE, false);
     }
