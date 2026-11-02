@@ -6,7 +6,7 @@ Targets (spec §6.6, §19 item 2; SRV-1.5, DATA-1.4):
 |---|---|---|
 | In-proxy p95 < 1 ms | 0.04–0.11 ms (`Server-Timing` on `next start`) | Met |
 | Added TTFB p95 < 5 ms on `next start` | 0.45–0.59 ms | Met |
-| Vercel number recorded | Pending: needs the fixture on Vercel (T12.3) | Open |
+| Vercel number recorded | In-proxy p95 0.25 ms on Vercel (`Server-Timing`); added TTFB not measurable yet (Vercel's DDoS mitigation challenges the run, see below) | Partial |
 | Aggregation p95 < 5 s at 50k exposures / 1M events | 0.66 s (visitor), 0.77 s (user) | Met |
 | Cloud job lag | ≤ 1 s inside a tick for 1,000 due jobs; the wait for a tick is the cron cadence | Recorded |
 
@@ -57,6 +57,22 @@ Budget per query is 5 s (the test fails above it); the aggregate route's whole-r
 - **Aggregate jobs** are bound by the customer app's response (the SQL above plus the network).
 - **Waiting for a tick:** the cron cadence. On Vercel Hobby (today) the cron runs once a day, so a job can wait up to 24 h; Recompute in the dashboard runs a site's jobs inline instead. On Vercel Pro the cron runs every minute: lag ≤ 60 s plus the queue ahead of the job.
 
-## Still to do
+## Vercel (T12.3)
 
-- **Vercel:** deploy both builds of the fixture (T12.3) and run `perf.ts --with <evolve url> --without <baseline url>`; add the numbers here. Over the internet the TTFB includes the network, so compare p50/p95 of the difference, and set `--requests` lower.
+Deployed 2026-11-02 (both built from the monorepo source at `next-evolve` 0.3.1, region iad1, Vercel Hobby, Fluid Compute):
+- **Evolve:** `https://fixture.evolveab.com` (project `evolve-fixture`, real prod cloud, Global Config on).
+- **Baseline:** `https://evolve-fixture-baseline.vercel.app` (project `evolve-fixture-baseline`, `EVOLVE_PERF_BASELINE=1`).
+
+Run from Tomer's laptop over the internet (~36 ms RTT):
+
+```
+node --experimental-strip-types apps/fixture/scripts/perf.ts \
+  --with https://fixture.evolveab.com --without https://evolve-fixture-baseline.vercel.app \
+  --requests 300 --warmup 30 --only /pricing --only /features --skip-load
+```
+
+Vercel doesn't send `x-middleware-rewrite`, so the script maps the static routes to their control page (`/ev_0…`) itself.
+
+- **In-proxy (`Server-Timing: evolve;dur`) on Vercel:** p50 0.19 ms, p95 0.25 ms, p99 0.25 ms (`/pricing`, returning visitor). Same order as on `next start`; the budget is 1 ms.
+- **Added TTFB: not measured.** Vercel's automatic DDoS mitigation answered `403 x-vercel-mitigated: challenge` (Security Checkpoint) to one IP's sequential requests after ~30 s (~13 req/s), on both projects, and kept challenging that path for 20+ minutes; 623 of 660 samples were challenges, so the TTFB columns are the challenge page and mean nothing. Real visitors (many IPs) aren't affected; Evolve's `/api/evolve/*` calls weren't challenged.
+- **To finish:** Tomer adds a temporary Firewall bypass rule for the measuring IP on both projects (Vercel dashboard → Firewall; or runs the command from a network Vercel doesn't challenge), then reruns the command above without `--only` and `--skip-load` and adds the table here.

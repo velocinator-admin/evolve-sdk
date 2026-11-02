@@ -38,6 +38,10 @@ const { values: args } = parseArgs({
     without: { type: "string" },
     rebuild: { type: "boolean", default: false },
     out: { type: "string" },
+    /** Run only scenarios whose name contains this (repeatable). */
+    only: { type: "string", multiple: true },
+    /** Skip the concurrent load run (a host's DDoS protection may challenge it). */
+    "skip-load": { type: "boolean", default: false },
   },
 });
 const N = Number(args.requests);
@@ -110,6 +114,18 @@ const SCENARIOS: Scenario[] = [
   { name: "/ static, bot", path: "/", ua: BOT_UA, visitor: "new" },
 ];
 
+/**
+ * The page the proxy rewrote to. `next start` says so in `x-middleware-rewrite`;
+ * Vercel doesn't send that header, so statically rendered routes map to their
+ * control page (`/ev_0…`), which is what the baseline serves.
+ */
+const STATIC_ROUTES = new Set(["/", "/pricing"]);
+function rewriteTarget(h: http.IncomingHttpHeaders, base: string, path: string): string {
+  const rewrite = h["x-middleware-rewrite"];
+  if (typeof rewrite === "string") return new URL(rewrite, base).pathname;
+  return STATIC_ROUTES.has(path) ? `/ev_0${path === "/" ? "" : path}` : path;
+}
+
 type ScenarioResult = {
   name: string;
   target: string;
@@ -130,8 +146,7 @@ async function runScenario(
   // The visitor's cookies, and the page the proxy rewrites them to.
   const first = await get(withUrl + s.path, { "user-agent": ua });
   const cookie = s.visitor === "returning" ? cookiesFrom(first.headers) : "";
-  const rewrite = first.headers["x-middleware-rewrite"];
-  const target = typeof rewrite === "string" ? new URL(rewrite, withUrl).pathname : s.path;
+  const target = rewriteTarget(first.headers, withUrl, s.path);
   const headers = { "user-agent": ua, ...(cookie ? { cookie } : {}) };
 
   const w: number[] = [];
@@ -277,19 +292,23 @@ const { withUrl, withoutUrl } = remote
   : await startLocal();
 
 const results: ScenarioResult[] = [];
-for (const s of SCENARIOS) {
+const scenarios = args.only?.length
+  ? SCENARIOS.filter((s) => args.only!.some((o) => s.name.includes(o)))
+  : SCENARIOS;
+for (const s of scenarios) {
   console.error(`${s.name}…`);
   results.push(await runScenario(withUrl, withoutUrl, s));
 }
 const visitor = await get(`${withUrl}/`, { "user-agent": HUMAN_UA });
 const cookie = cookiesFrom(visitor.headers);
-const target = new URL(String(visitor.headers["x-middleware-rewrite"] ?? "/ev_0"), withUrl)
-  .pathname;
-const load = {
-  concurrency: C,
-  with: await throughput(`${withUrl}/`, { "user-agent": HUMAN_UA, cookie }, N),
-  without: await throughput(`${withoutUrl}${target}`, { "user-agent": HUMAN_UA }, N),
-};
+const target = rewriteTarget(visitor.headers, withUrl, "/");
+const load = args["skip-load"]
+  ? null
+  : {
+      concurrency: C,
+      with: await throughput(`${withUrl}/`, { "user-agent": HUMAN_UA, cookie }, N),
+      without: await throughput(`${withoutUrl}${target}`, { "user-agent": HUMAN_UA }, N),
+    };
 
 const report = {
   at: new Date().toISOString(),
@@ -313,9 +332,10 @@ for (const r of results) {
     `| ${r.name} | ${t(r.with)} | ${t(r.without)} | ${r.addedP50.toFixed(2)} / ${r.addedP95.toFixed(2)} | ${Number.isNaN(r.serverTiming.p50) ? "—" : t(r.serverTiming)} |`,
   );
 }
-print(
-  `\nLoad, ${C} concurrent, ${N} requests on /: Evolve ${load.with.rps} req/s (TTFB p95 ${load.with.ttfb.p95.toFixed(2)} ms), baseline ${load.without.rps} req/s (p95 ${load.without.ttfb.p95.toFixed(2)} ms)`,
-);
+if (load)
+  print(
+    `\nLoad, ${C} concurrent, ${N} requests on /: Evolve ${load.with.rps} req/s (TTFB p95 ${load.with.ttfb.p95.toFixed(2)} ms), baseline ${load.without.rps} req/s (p95 ${load.without.ttfb.p95.toFixed(2)} ms)`,
+  );
 const errors = results.reduce((s, r) => s + r.errors, 0);
 if (errors) print(`errors (non-200): ${errors}`);
 
