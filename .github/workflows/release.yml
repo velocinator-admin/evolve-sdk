@@ -80,7 +80,9 @@ jobs:
       # the registry's dist-tag API directly. If npm refuses, the log says so and
       # the fallback is `npm dist-tag add <pkg>@<ver> alpha` from a logged-in shell.
       - name: Tag alpha
-        if: steps.changesets.outputs.published == 'true' || inputs.tag_alpha_only
+        # changesets/action doesn't report `published` for changesets 3's output, so
+        # run on every push (idempotent) and skip versions that aren't on npm.
+        if: github.event_name == 'push' || inputs.tag_alpha_only
         continue-on-error: true
         run: |
           oidc=$(curl -sf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
@@ -88,6 +90,8 @@ jobs:
           status=0
           for dir in packages/next-evolve packages/protocol; do
             name=$(jq -r .name $dir/package.json); ver=$(jq -r .version $dir/package.json)
+            npm view "$name@$ver" version >/dev/null 2>&1 || { echo "$name@$ver not on npm; skip"; continue; }
+            [ "$(npm view "$name" dist-tags.alpha 2>/dev/null)" = "$ver" ] && { echo "$name alpha = $ver already"; continue; }
             enc=$(jq -rn --arg n "$name" '$n|@uri')
             token=$(curl -sf -X POST -H "Authorization: Bearer $oidc" \
               "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/$enc" | jq -r .token)
