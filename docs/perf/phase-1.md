@@ -6,7 +6,7 @@ Targets (spec §6.6, §19 item 2; SRV-1.5, DATA-1.4):
 |---|---|---|
 | In-proxy p95 < 1 ms | 0.04–0.11 ms (`Server-Timing` on `next start`) | Met |
 | Added TTFB p95 < 5 ms on `next start` | 0.45–0.59 ms | Met |
-| Vercel number recorded | In-proxy p95 0.25 ms on Vercel (`Server-Timing`); added TTFB not measurable yet (Vercel's DDoS mitigation challenges the run, see below) | Partial |
+| Vercel number recorded | In-proxy p95 0.25 ms on Vercel (`Server-Timing`); added TTFB on a real site (T12.4, 4dfit.app): +19 ms p50 / +13 ms p95 vs. a page without the proxy, almost all of it Vercel's proxy invocation (in-proxy 0.12 ms); see below | Done (over the 5 ms TTFB budget on Vercel; platform cost) |
 | Aggregation p95 < 5 s at 50k exposures / 1M events | 0.66 s (visitor), 0.77 s (user) | Met |
 | Cloud job lag | ≤ 1 s inside a tick for 1,000 due jobs; the wait for a tick is the cron cadence | Recorded |
 
@@ -76,3 +76,16 @@ Vercel doesn't send `x-middleware-rewrite`, so the script maps the static routes
 - **In-proxy (`Server-Timing: evolve;dur`) on Vercel:** p50 0.19 ms, p95 0.25 ms, p99 0.25 ms (`/pricing`, returning visitor). Same order as on `next start`; the budget is 1 ms.
 - **Added TTFB: not measured.** Vercel's automatic DDoS mitigation answered `403 x-vercel-mitigated: challenge` (Security Checkpoint) to one IP's sequential requests after ~30 s (~13 req/s), on both projects, and kept challenging that path for 20+ minutes; 623 of 660 samples were challenges, so the TTFB columns are the challenge page and mean nothing. Real visitors (many IPs) aren't affected; Evolve's `/api/evolve/*` calls weren't challenged.
 - **To finish:** Tomer adds a temporary Firewall bypass rule for the measuring IP on both projects (Vercel dashboard → Firewall; or runs the command from a network Vercel doesn't challenge), then reruns the command above without `--only` and `--skip-load` and adds the table here.
+
+## Real site on Vercel (T12.4)
+
+`https://4dfit.app` (Tomer's 4D FIT site, Next 16.2.10, `next-evolve` 0.4.0, Vercel Hobby, iad1), 2026-11-02, one running experiment on `/` (static mode). A slow sampler (one request every 0.5 s, keep-alive, so Vercel's DDoS mitigation never challenged it) alternated 200 pairs: `/` as a returning visitor (proxy runs, then the variant's cached ISR page, `x-vercel-cache: HIT`) and `/privacy` (a static page the proxy doesn't match, also a CDN HIT). Measured from a laptop on the US east coast.
+
+| | p50 | p95 |
+|---|---|---|
+| `/` through the Evolve proxy | 61.8 ms | 81.4 ms |
+| `/privacy`, no proxy | 42.5 ms | 68.7 ms |
+| **Added TTFB** | **+19.3 ms** | **+12.7 ms** |
+| In-proxy (`Server-Timing: evolve;dur`) | 0.12 ms | |
+
+The Evolve code in the proxy takes ~0.1 ms; the rest is what Vercel charges for running any Node proxy (`proxy.ts`) in front of a CDN-cached page: the request goes to a function instead of straight from the edge cache. A no-op `proxy.ts` would show most of the same cost; measuring that (a second project with an empty proxy) would separate the two. The two pages differ in size (the TTFB excludes the body). The spec's 5 ms added-TTFB budget holds on `next start` (0.45–0.59 ms) but not on Vercel's proxy model; options for later: an Edge-runtime proxy, or testing only the routes that need it (already the case: only `/` is in the matcher).
