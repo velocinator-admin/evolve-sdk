@@ -86,6 +86,7 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
             "no bundle yet (no experiment has started): serving control",
             undefined,
             3_600_000,
+            "info",
           );
         } else if (res.status === "error") {
           logRateLimited(`fetch:${res.code}`, `bundle fetch failed (${res.code})`, res.message);

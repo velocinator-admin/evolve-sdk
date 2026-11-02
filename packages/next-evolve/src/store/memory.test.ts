@@ -57,18 +57,20 @@ function setup(opts: { initial?: string; pollMs?: number; random?: number } = {}
     reply,
     advance: (ms: number) => (t += ms),
     errors: vi.spyOn(console, "error").mockImplementation(() => {}),
+    infos: vi.spyOn(console, "info").mockImplementation(() => {}),
   };
 }
 
 describe("memory bundle store", () => {
-  it("a new site's 404 no_bundle logs what it means, not a failure", async () => {
+  it("a new site's 404 no_bundle logs what it means at info level, not a failure", async () => {
     const s = setup();
     s.store.peek();
     await s.reply({ status: "error", code: 404, message: '{"error":"no_bundle"}' });
-    expect(s.errors).toHaveBeenCalledWith(
+    // Info, not stderr: hosts like Vercel show stderr lines as errors.
+    expect(s.infos).toHaveBeenCalledWith(
       "[evolve] no bundle yet (no experiment has started): serving control",
     );
-    expect(String(s.errors.mock.calls)).not.toContain("bundle fetch failed");
+    expect(s.errors).not.toHaveBeenCalled();
     expect(s.store.peek()).toBeNull();
   });
 
