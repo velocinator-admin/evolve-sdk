@@ -31,6 +31,10 @@ Both routes check an HMAC signature made with `EVOLVE_WEBHOOK_SECRET` (shared on
 
 The collect route turns each page load's LCP, CLS and INP into a count in a fixed bin (`VITALS_BINS` in `@next-evolve/protocol`, e.g. "LCP between 2,250 and 2,500 ms") for each experiment and variant shown on that page, in `evolve.vitals_daily`. No visitor id, path or timestamp is stored with it. When the cloud's aggregate request has a `vitals` field, the response adds one histogram per experiment × variant × metric × day: the list of bin counts. That is all the cloud learns about page speed; it uses it to pause a variant that makes pages clearly slower than control. SDKs before 0.5 store and send no vitals.
 
+### Page fetch for AI suggestions (`EvolveBot`)
+
+When you ask the cloud to suggest variants for a region, it may fetch the public page that region lives on, at most once per page per day, to read its visible text. It's an anonymous `GET` (no cookies, no key, no redirects followed, 5 s timeout, at most 1 MB) to your site's domain, with the user agent `EvolveBot/1.0 (+https://evolveab.com/bot)`. The SDK treats that user agent as a bot, so your site serves it control, sets no cookie and records nothing. It sees exactly what any anonymous visitor sees. Only the page's text (at most 4,000 characters) is kept, to write better suggestions.
+
 **Never sent:** visitor ids (`evolve_id`), your user ids, IP addresses, user agents, event props, page-view paths, individual events or timestamps. The cloud's database has no column for them, and a test fails if one is added.
 
 ## Your app → Vercel (optional)

@@ -1,5 +1,18 @@
 # next-evolve
 
+## 0.5.0
+
+### Minor Changes
+
+- 1e6e35e: Core Web Vitals storage: migration `0002_vitals` adds `evolve.vitals_daily` (counts per experiment × variant × metric × UTC day × bin; no visitor id). It only adds a table, so `next-evolve migrate` is safe on a live database. The collect route accepts `{ t: "cwv", m, v, p }` beacon events, attributes them to the counted experiment/variant pairs the same batch reports for that page (pairs in the local bundle only), and writes one upsert per batch. Bots, previews, visitors without an Evolve id, unknown pairs and out-of-range values (negative, over 10 minutes, CLS over 10) are dropped.
+- 6c1b03d: The beacon measures Core Web Vitals with hand-written `PerformanceObserver`s (no new dependency): LCP (last candidate before the first input), CLS (largest session window) and INP (approximated as the longest interaction on the page, good enough to compare arms on the same page). It sends them once per document, on the first page hide, together with that page's counted experiment/variant pairs, to the same-origin collect route. No new id is sent. Skipped for browsers without these entry types and under automation (`navigator.webdriver`); the collect route drops bots and previews. The client budget is now 3 KB gzipped (the beacon is about 2.6 KB).
+- d040d65: The aggregate route (and `next-evolve aggregate`) answers protocol 1.1.0's `vitals: { from }`: one `group by` over `evolve.vitals_daily` for the requested experiments and variants (only the experiments the response returns), from `from` to the request's day, pivoted into one `bins` array per experiment × variant × metric × day (at most 5,000 rows). It counts against the same time budget. If it fails, runs out of time or would exceed the cap, the response has an `errors` entry with `goal: "$vitals"` and no `vitals`. Without `vitals` in the request the response is unchanged. Docs: "What leaves your server" and "Concepts" describe the vitals histograms.
+
+### Patch Changes
+
+- Updated dependencies [febe201]
+  - @next-evolve/protocol@1.1.0
+
 ## 0.4.1
 
 ### Patch Changes
