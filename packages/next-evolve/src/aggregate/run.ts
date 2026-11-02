@@ -7,6 +7,12 @@ import {
   type AggregateResponse,
   type AggregateRow,
   MAX_RESPONSE_ROWS,
+  MAX_VITALS_ROWS,
+  VITALS_BINS,
+  VITALS_ERROR_GOAL,
+  VITALS_METRICS,
+  type VitalsMetric,
+  type VitalsRow,
 } from "@next-evolve/protocol";
 import type { Sql } from "../db/client";
 import { runAttribution } from "./attribution";
@@ -120,6 +126,32 @@ export async function runAggregate(
       rows.push(...expRows);
       errors.push(...expErrors);
     }
+    // Protocol 1.1.0: Core Web Vitals histograms, only when asked and only for the
+    // experiments this response returns. A failure is reported, never half-sent.
+    let vitals: VitalsRow[] | undefined;
+    if (req.vitals) {
+      const returned = req.experiments.filter((e) => !remaining.includes(e.id));
+      const left = deadline - now();
+      if (left < MIN_QUERY_MS) {
+        errors.push({ goal: VITALS_ERROR_GOAL, message: "out of time budget" });
+      } else {
+        await conn.unsafe(
+          `set statement_timeout = ${Math.floor(Math.min(opts.statementTimeoutMs, left))}`,
+        );
+        try {
+          const out = await queryVitals(conn, returned, req.vitals.from, req.asOf.slice(0, 10));
+          if (out.length > MAX_VITALS_ROWS) {
+            errors.push({ goal: VITALS_ERROR_GOAL, message: "too many vitals rows" });
+          } else vitals = out;
+        } catch (e) {
+          const code = (e as { code?: string }).code;
+          errors.push({
+            goal: VITALS_ERROR_GOAL,
+            message: code === QUERY_CANCELED ? "statement timeout" : errorMessage(e),
+          });
+        }
+      }
+    }
     await conn.unsafe("set statement_timeout = 0");
 
     const usage = req.usageFrom
@@ -143,6 +175,7 @@ export async function runAggregate(
       rows,
       usage,
       errors,
+      ...(vitals ? { vitals } : {}),
     };
     const body = JSON.stringify(response);
     await conn`
@@ -160,6 +193,49 @@ export async function runAggregate(
     }
     conn.release();
   }
+}
+
+/**
+ * One `group by` over `evolve.vitals_daily` for the requested experiment ×
+ * variant pairs and cohort days `from`..`to`, pivoted into one bins array per
+ * experiment × variant × metric × day. Only metrics the protocol defines.
+ */
+async function queryVitals(
+  sql: Sql,
+  experiments: AggregateRequest["experiments"],
+  from: string,
+  to: string,
+): Promise<VitalsRow[]> {
+  const exps = experiments.flatMap((e) => e.variants.map(() => e.id));
+  const vars = experiments.flatMap((e) => e.variants);
+  if (!exps.length) return [];
+  const rows = await sql<
+    { exp: string; var: string; metric: VitalsMetric; day: string; bin: number; n: string }[]
+  >`
+    select v.experiment_id as exp, v.variant_id as var, v.metric,
+      to_char(v.day, 'YYYY-MM-DD') as day, v.bin, sum(v.count)::text as n
+    from evolve.vitals_daily v
+    join unnest(${exps}::text[], ${vars}::text[]) as p(exp, var)
+      on p.exp = v.experiment_id and p.var = v.variant_id
+    where v.day >= ${from}::date and v.day <= ${to}::date
+      and v.metric = any(${[...VITALS_METRICS]}::text[])
+    group by 1, 2, 3, 4, 5
+    order by 1, 2, 3, 4, 5`;
+  const out: VitalsRow[] = [];
+  const at = new Map<string, number[]>();
+  for (const r of rows) {
+    const edges = VITALS_BINS[r.metric];
+    if (r.bin < 0 || r.bin > edges.length) continue;
+    const k = `${r.exp}|${r.var}|${r.metric}|${r.day}`;
+    let bins = at.get(k);
+    if (!bins) {
+      bins = new Array<number>(edges.length + 1).fill(0);
+      at.set(k, bins);
+      out.push({ exp: r.exp, var: r.var, metric: r.metric, day: r.day, bins });
+    }
+    bins[r.bin] = Number(r.n);
+  }
+  return out;
 }
 
 function errorMessage(e: unknown): string {

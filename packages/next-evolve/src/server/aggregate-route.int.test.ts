@@ -5,6 +5,7 @@ import {
   createReplayGuard,
   newRequestId,
   signBody,
+  VITALS_BINS,
   verifyBody,
 } from "@next-evolve/protocol";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -305,5 +306,147 @@ describe("POST /api/evolve/aggregate: replay (T12.5)", () => {
         .status,
     ).toBe(401);
     expect((await send({ "evolve-signature": signBody(SECRET, text) })).status).toBe(409);
+  });
+});
+
+describe("POST /api/evolve/aggregate: Core Web Vitals (protocol 1.1.0)", () => {
+  const OLD_KEYS = [
+    "asOf",
+    "durationMs",
+    "errors",
+    "mode",
+    "partial",
+    "pv",
+    "remaining",
+    "requestId",
+    "rows",
+    "sdk",
+    "site",
+    "usage",
+  ];
+  beforeEach(async () => {
+    await sql`insert into evolve.vitals_daily (experiment_id, variant_id, metric, day, bin, count) values
+      ('k3j9x2', 'a8f2l1', 'lcp', '2026-11-19', 3, 50),
+      ('k3j9x2', 'a8f2l1', 'lcp', '2026-11-20', 4, 7),
+      ('k3j9x2', 'a8f2l1', 'lcp', '2026-11-20', 24, 1),
+      ('k3j9x2', 'a8f2l1', 'cls', '2026-11-20', 0, 9),
+      ('k3j9x2', 'c1d2e3', 'lcp', '2026-11-21', 8, 2),
+      ('k3j9x2', 'c1d2e3', 'inp', '2026-11-21', 20, 4),
+      ('k3j9x2', 'zzzzzz', 'lcp', '2026-11-21', 1, 5),
+      ('k3j9x2', 'a8f2l1', 'fcp', '2026-11-21', 1, 5),
+      ('k3j9x2', 'a8f2l1', 'lcp', '2026-12-02', 1, 5),
+      ('p7q8r9', 'm1n2o3', 'cls', '2026-11-22', 2, 3),
+      ('zz9999', 'a8f2l1', 'lcp', '2026-11-21', 1, 5)`;
+  });
+  /** A clock returning `base + offsets[i]` on its i-th read, then the last offset. */
+  const clock = (base: number, offsets: number[]) => {
+    let i = 0;
+    return () => base + offsets[Math.min(i++, offsets.length - 1)]!;
+  };
+  const bins = (m: keyof typeof VITALS_BINS, at: Record<number, number>) =>
+    Array.from({ length: VITALS_BINS[m].length + 1 }, (_, i) => at[i] ?? 0);
+
+  it("not asked → no vitals key: the response is the same shape as 0.4.1's", async () => {
+    const body = await ok(await handleAggregate(post(request()), deps()));
+    expect(Object.keys(body).sort()).toEqual(OLD_KEYS);
+  });
+
+  it("asked → one histogram per experiment × variant × metric × day, from `from` to asOf", async () => {
+    const body = await ok(
+      await handleAggregate(post(request({ vitals: { from: "2026-11-20" } })), deps()),
+    );
+    expect(body.errors).toEqual([]);
+    // Requested experiments and variants only, known metrics only, days from..asOf.
+    expect(body.vitals).toEqual([
+      {
+        exp: "k3j9x2",
+        var: "a8f2l1",
+        metric: "cls",
+        day: "2026-11-20",
+        bins: bins("cls", { 0: 9 }),
+      },
+      {
+        exp: "k3j9x2",
+        var: "a8f2l1",
+        metric: "lcp",
+        day: "2026-11-20",
+        bins: bins("lcp", { 4: 7, 24: 1 }),
+      },
+      {
+        exp: "k3j9x2",
+        var: "c1d2e3",
+        metric: "inp",
+        day: "2026-11-21",
+        bins: bins("inp", { 20: 4 }),
+      },
+      {
+        exp: "k3j9x2",
+        var: "c1d2e3",
+        metric: "lcp",
+        day: "2026-11-21",
+        bins: bins("lcp", { 8: 2 }),
+      },
+      {
+        exp: "p7q8r9",
+        var: "m1n2o3",
+        metric: "cls",
+        day: "2026-11-22",
+        bins: bins("cls", { 2: 3 }),
+      },
+    ]);
+    // Rows match the table: every count is accounted for.
+    const [t] = await sql`select sum(count)::int as n from evolve.vitals_daily
+      where experiment_id in ('k3j9x2', 'p7q8r9') and variant_id <> 'zzzzzz' and metric <> 'fcp'
+        and day between '2026-11-20' and '2026-12-01'`;
+    expect(body.vitals!.flatMap((v) => v.bins).reduce((a, b) => a + b, 0)).toBe(t!.n);
+  });
+
+  it("only for the experiments the response returns (not the remaining ones)", async () => {
+    // Clock reads: signature, start, experiment 1, experiment 2 (budget gone), vitals.
+    const T = Date.now();
+    const now = clock(T, [0, 0, 0, 5000, 0]);
+    const body = await ok(
+      await handleAggregate(
+        post(request({ vitals: { from: "2026-11-20" } }), { t: Math.floor(T / 1000) }),
+        deps({ now, config: resolveConfig({ routes: {}, aggregate: { maxMs: 4000 } }) }),
+      ),
+    );
+    expect(body.remaining).toEqual(["p7q8r9"]);
+    expect(new Set(body.vitals?.map((v) => v.exp))).toEqual(new Set(["k3j9x2"]));
+  });
+
+  it("a failing vitals query → errors[{ goal: '$vitals' }] and no vitals; goal rows unaffected", async () => {
+    const holder = await sql.reserve();
+    try {
+      await holder`begin`;
+      await holder`lock table evolve.vitals_daily in access exclusive mode`;
+      const body = await ok(
+        await handleAggregate(
+          post(request({ vitals: { from: "2026-11-20" } })),
+          deps({ config: resolveConfig({ routes: {}, aggregate: { statementTimeoutMs: 200 } }) }),
+        ),
+      );
+      expect(body).not.toHaveProperty("vitals");
+      expect(body.errors).toEqual([{ goal: "$vitals", message: "statement timeout" }]);
+      expect(body.rows.length).toBeGreaterThan(0);
+    } finally {
+      await holder`rollback`;
+      holder.release();
+    }
+  });
+
+  it("no budget left for vitals → a $vitals error, not a missing histogram", async () => {
+    // Clock reads: signature, start, both experiments in budget, then 300 ms left for vitals.
+    const T = Date.now();
+    const now = clock(T, [0, 0, 0, 0, 4200]);
+    const body = await ok(
+      await handleAggregate(
+        post(request({ vitals: { from: "2026-11-20" } }), { t: Math.floor(T / 1000) }),
+        deps({ now, config: resolveConfig({ routes: {}, aggregate: { maxMs: 4500 } }) }),
+      ),
+    );
+    expect(body.remaining).toEqual([]);
+    expect(body).not.toHaveProperty("vitals");
+    expect(body.errors).toEqual([{ goal: "$vitals", message: "out of time budget" }]);
   });
 });

@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@next-evolve/fake-cloud": "workspace:*",
+    "@next-evolve/protocol": "workspace:*",
     "@playwright/test": "1.64.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

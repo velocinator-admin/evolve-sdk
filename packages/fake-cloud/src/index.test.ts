@@ -128,7 +128,16 @@ describe("fake cloud: aggregation", () => {
     rows: [],
     usage: [],
     errors: [],
+    // Protocol 1.1.0: an app answers vitals only when asked.
+    ...(req.vitals
+      ? {
+          vitals: [
+            { exp: "k3j9x2", var: "a8f2l1", metric: "lcp", day: req.vitals.from, bins: lcpBins },
+          ],
+        }
+      : {}),
   });
+  const lcpBins = Array.from({ length: 25 }, (_, i) => (i === 4 ? 2 : 0));
 
   /** A stand-in app: verifies the request and answers, signed with `secret`. */
   async function app(secret: string, tamper = false) {
@@ -164,6 +173,23 @@ describe("fake cloud: aggregation", () => {
       });
       expect(x.response?.requestId).toBe(x.request.requestId);
       expect(cloud.aggregates.at(-1)).toBe(x);
+    } finally {
+      a.close();
+    }
+  });
+
+  it("passes a vitals request through and records the vitals it gets back", async () => {
+    const a = await app(TEST_WEBHOOK_SECRET);
+    try {
+      const x = await cloud.aggregate(a.url, { experiments, vitals: { from: "2026-11-20" } });
+      expect(x.verified).toBe(true);
+      expect(x.request.vitals).toEqual({ from: "2026-11-20" });
+      expect(x.response?.vitals).toEqual([
+        { exp: "k3j9x2", var: "a8f2l1", metric: "lcp", day: "2026-11-20", bins: lcpBins },
+      ]);
+      const plain = await cloud.aggregate(a.url, { experiments });
+      expect(plain.request).not.toHaveProperty("vitals");
+      expect(plain.response).not.toHaveProperty("vitals");
     } finally {
       a.close();
     }

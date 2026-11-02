@@ -77,11 +77,19 @@ export const offlineAppEnv = {
   EVOLVE_CACHE_DIR: ".evolve-cache/offline",
 };
 
-/** Hero test on "/" (A = control, B = new headline) and a pricing CTA test. */
+/**
+ * Hero test on "/" (A = control, B = new headline), a pricing CTA test, a dynamic
+ * features test, and s1ow01 on "/slow" whose B arm delays its LCP image (T17.4).
+ */
 export const M1_BUNDLE = {
   site: TEST_SITE,
   routing: {
-    routes: { "/": ["k3j9x2"], "/pricing": ["p7q8r9"], "/features": ["f5e6a7"] },
+    routes: {
+      "/": ["k3j9x2"],
+      "/pricing": ["p7q8r9"],
+      "/features": ["f5e6a7"],
+      "/slow": ["s1ow01"],
+    },
     experiments: {
       k3j9x2: {
         status: "running",
@@ -99,6 +107,15 @@ export const M1_BUNDLE = {
         variants: [
           { id: "fa0000", w: 0.5 },
           { id: "fb0000", w: 0.5 },
+        ],
+      },
+      s1ow01: {
+        status: "running",
+        traffic: 1,
+        control: "sa0000",
+        variants: [
+          { id: "sa0000", w: 0.5 },
+          { id: "sb0000", w: 0.5 },
         ],
       },
       p7q8r9: {
@@ -127,6 +144,8 @@ export const M1_BUNDLE = {
       ctrl: false,
       props: { title: "All the tools, none of the flicker" },
     },
+    sa0000: { exp: "s1ow01", region: "slow-hero", ctrl: true, props: {} },
+    sb0000: { exp: "s1ow01", region: "slow-hero", ctrl: false, props: { slowImageMs: 1500 } },
     m1n2o3: { exp: "p7q8r9", region: "pricing-cta", ctrl: true, props: {} },
     s4t5u6: {
       exp: "p7q8r9",

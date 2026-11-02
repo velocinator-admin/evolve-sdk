@@ -12,7 +12,7 @@ const state = async (request: import("@playwright/test").APIRequestContext) =>
 // each region after rendering it. Configuration only, no visitor data.
 test("manifest and regions reach the cloud", async ({ request }) => {
   const m = (await state(request)).manifests[TEST_SITE];
-  expect(Object.keys(m?.routes ?? {}).sort()).toEqual(["/", "/features", "/pricing"]);
+  expect(Object.keys(m?.routes ?? {}).sort()).toEqual(["/", "/features", "/pricing", "/slow"]);
   expect(Object.keys(m?.goals ?? {}).length).toBeGreaterThan(0);
 
   await request.get("/");

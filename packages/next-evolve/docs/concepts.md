@@ -10,6 +10,7 @@
   - **Bandit:** Evolve Cloud shifts traffic toward the better arm as data arrives (recomputed at most hourly, on the primary goal).
 - **Goal:** what counts as success, defined in `evolve.goals.ts` (an event or a page view, a window, optional value). See [goals-and-attribution.md](goals-and-attribution.md).
 - **Exposure:** the first time a visitor sees an experiment. The beacon reports it; one row per visitor per experiment in your database.
+- **Core Web Vitals (0.5+):** the beacon also measures LCP, CLS and INP once per page load. They are stored as daily histograms per experiment and variant (no visitor id), so the cloud can compare each variant's page speed with control. INP is approximated as the slowest interaction on the page, which is enough to compare arms on the same page.
 
 Limits enforced by the cloud: at most 3 running experiments per path and one live experiment per region.
 
