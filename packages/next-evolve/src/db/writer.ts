@@ -24,6 +24,16 @@ export type EventRow = {
   dedupe_key: string | null;
 };
 export type IdentityRow = { anon_id: string; user_id: string };
+/** One Core Web Vitals sample (or `count` of them) in a histogram bin. No visitor id. */
+export type VitalsRow = {
+  experiment_id: string;
+  variant_id: string;
+  metric: string;
+  /** UTC `YYYY-MM-DD`. */
+  day: string;
+  bin: number;
+  count: number;
+};
 
 export type WriterOptions = {
   sql: () => Sql | null;
@@ -41,6 +51,8 @@ export type Writer = {
   identities(rows: IdentityRow[]): void;
   /** Adds tested page views to a UTC day (`YYYY-MM-DD`). */
   usage(day: string, pageviews: number): void;
+  /** Adds samples to `evolve.vitals_daily` bins. */
+  vitals(rows: VitalsRow[]): void;
   /** Rows waiting to be written. */
   pending(): number;
   /** Writes everything queued so far: one insert per table (chunked at 1,000 rows). */
@@ -60,11 +72,13 @@ export function createWriter(opts: WriterOptions): Writer {
   let events: EventRow[] = [];
   let identities: IdentityRow[] = [];
   let usage = new Map<string, number>();
+  let vitals = new Map<string, VitalsRow>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let backoffMs = 0;
   let running: Promise<void> = Promise.resolve();
 
-  const pending = () => exposures.length + events.length + identities.length + usage.size;
+  const pending = () =>
+    exposures.length + events.length + identities.length + usage.size + vitals.size;
 
   function schedule(delay: number) {
     if (mode !== "node" || timer) return;
@@ -117,14 +131,28 @@ export function createWriter(opts: WriterOptions): Writer {
         on conflict (day) do update
         set tested_pageviews = evolve.usage_daily.tested_pageviews + excluded.tested_pageviews`;
     }
+    // Keys are unique per batch (merged in addVitals), so one upsert never hits a row twice.
+    for (const rows of chunks([...batch.vitals.values()])) {
+      await sql`insert into evolve.vitals_daily ${sql(rows, VITALS_COLS)}
+        on conflict (experiment_id, variant_id, metric, day, bin) do update
+        set count = evolve.vitals_daily.count + excluded.count`;
+    }
+  }
+
+  function addVitals(into: Map<string, VitalsRow>, r: VitalsRow) {
+    const k = `${r.experiment_id}|${r.variant_id}|${r.metric}|${r.day}|${r.bin}`;
+    const had = into.get(k);
+    if (had) had.count += r.count;
+    else into.set(k, { ...r });
   }
 
   function take(): Batch {
-    const b = { exposures, events, identities, usage };
+    const b = { exposures, events, identities, usage, vitals };
     exposures = [];
     events = [];
     identities = [];
     usage = new Map();
+    vitals = new Map();
     return b;
   }
 
@@ -133,6 +161,7 @@ export function createWriter(opts: WriterOptions): Writer {
     events = [...b.events, ...events];
     identities = [...b.identities, ...identities];
     for (const [d, n] of b.usage) usage.set(d, (usage.get(d) ?? 0) + n);
+    for (const r of b.vitals.values()) addVitals(vitals, r);
   }
 
   async function flushOnce() {
@@ -196,6 +225,11 @@ export function createWriter(opts: WriterOptions): Writer {
       usage.set(day, (usage.get(day) ?? 0) + n);
       added();
     },
+    vitals(rows) {
+      if (!rows.length) return;
+      for (const r of rows) addVitals(vitals, r);
+      added();
+    },
     pending,
     flush,
   };
@@ -206,6 +240,7 @@ type Batch = {
   events: EventRow[];
   identities: IdentityRow[];
   usage: Map<string, number>;
+  vitals: Map<string, VitalsRow>;
 };
 
 const EVENT_COLS = [
@@ -220,6 +255,8 @@ const EVENT_COLS = [
   "path",
   "dedupe_key",
 ] as const;
+
+const VITALS_COLS = ["experiment_id", "variant_id", "metric", "day", "bin", "count"] as const;
 
 function* chunks<T>(rows: T[]): Generator<T[]> {
   for (let i = 0; i < rows.length; i += CHUNK) yield rows.slice(i, i + CHUNK);

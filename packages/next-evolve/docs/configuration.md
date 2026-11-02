@@ -71,4 +71,4 @@ All are `HttpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` over https. None is s
 
 ## Database
 
-`next-evolve migrate` creates a schema named `evolve` with these tables: `exposures` (one row per visitor per experiment), `events`, `identities`, `usage_daily` (tested page views per day), `aggregate_runs` (the last 24 h of aggregate responses, for retries) and `migrations`. Your own tables aren't touched. Rows are kept until you delete them.
+`next-evolve migrate` creates a schema named `evolve` with these tables: `exposures` (one row per visitor per experiment), `events`, `identities`, `usage_daily` (tested page views per day), `vitals_daily` (Core Web Vitals histograms: counts per experiment, variant, metric, day and bin, no visitor id; since 0.5), `aggregate_runs` (the last 24 h of aggregate responses, for retries) and `migrations`. Your own tables aren't touched. Rows are kept until you delete them.

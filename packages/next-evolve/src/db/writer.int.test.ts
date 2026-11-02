@@ -103,6 +103,31 @@ describe("writer", () => {
     ]);
   });
 
+  it("increments vitals histograms with one upsert per flush", async () => {
+    const w = createWriter({ sql: () => counted, mode: "serverless" });
+    const v = (variant: string, metric: string, bin: number, n = 1) => ({
+      experiment_id: "k3j9x2",
+      variant_id: variant,
+      metric,
+      day: "2026-11-02",
+      bin,
+      count: n,
+    });
+    w.vitals([v("a8f2l1", "lcp", 4), v("a8f2l1", "lcp", 4), v("c1d2e3", "cls", 0, 3)]);
+    await w.flush();
+    expect(inserts).toEqual(["insert into evolve.vitals_daily"]);
+    w.vitals([v("a8f2l1", "lcp", 4), v("a8f2l1", "lcp", 5)]);
+    await w.flush();
+    expect(inserts).toHaveLength(2);
+    const rows = await sql`select variant_id, metric, bin, count::int as n from evolve.vitals_daily
+      order by variant_id, metric, bin`;
+    expect(rows.map((r) => `${r.variant_id}:${r.metric}:${r.bin}=${r.n}`)).toEqual([
+      "a8f2l1:lcp:4=3",
+      "a8f2l1:lcp:5=1",
+      "c1d2e3:cls:0=3",
+    ]);
+  });
+
   it("node mode flushes at 100 rows without waiting for the timer", async () => {
     const w = createWriter({ sql: () => counted, mode: "node", flushMs: 60_000 });
     w.events(Array.from({ length: 99 }, () => ev()));

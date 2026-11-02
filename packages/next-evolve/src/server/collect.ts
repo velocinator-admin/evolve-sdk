@@ -1,9 +1,16 @@
-import { ANON_ID_RE, type BundlePayload, ID_RE } from "@next-evolve/protocol";
+import {
+  ANON_ID_RE,
+  type BundlePayload,
+  binFor,
+  ID_RE,
+  VITALS_METRICS,
+  type VitalsMetric,
+} from "@next-evolve/protocol";
 import { z } from "zod";
 import { normalizePath, type ResolvedConfig } from "../config/config";
 import { type Goals, matchesPageviewGoal } from "../config/goals";
 import { ANON_COOKIE, PREVIEW_COOKIE } from "../core/cookies";
-import type { EventRow, ExposureRow, Writer } from "../db/writer";
+import type { EventRow, ExposureRow, VitalsRow, Writer } from "../db/writer";
 import { eventRow, utcDay } from "./events";
 
 export const MAX_BATCH_BYTES = 32 * 1024;
@@ -25,7 +32,14 @@ const beaconEvent = z.discriminatedUnion("t", [
     props: z.record(z.string(), z.unknown()).optional(),
   }),
   z.object({ t: z.literal("id"), u: z.string().min(1).max(256) }),
+  // Core Web Vitals for the page (0.5+): attributed to the batch's counted pairs on `p`.
+  z.object({ t: z.literal("cwv"), m: z.enum(VITALS_METRICS), v: z.number(), p: path }),
 ]);
+
+/** Largest plausible value per metric (ms for LCP/INP; CLS is a score); anything else is dropped. */
+const VITALS_MAX: Record<VitalsMetric, number> = { lcp: 600_000, inp: 600_000, cls: 10 };
+const vitalsValueOk = (m: VitalsMetric, v: number) =>
+  Number.isFinite(v) && v >= 0 && v <= VITALS_MAX[m];
 /** Beacon payload (spec §8.1). Unknown event types are skipped, not fatal. */
 export const collectSchema = z.object({
   v: z.literal(1),
@@ -142,6 +156,9 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
   }
   const exposures: ExposureRow[] = [];
   const rows: EventRow[] = [];
+  /** Known pairs the batch reports per page; vitals for that page count for each of them. */
+  const pairs = new Map<string, Map<string, string>>();
+  const cwv = new Map<string, number>();
   let testedPageviews = 0;
 
   for (const e of events) {
@@ -149,6 +166,9 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
       case "exp": {
         // Only pairs the local bundle knows about; anything else is noise or forgery.
         if (known(e.e, e.v)) {
+          const p = normalizePath(e.p);
+          if (!pairs.has(p)) pairs.set(p, new Map());
+          pairs.get(p)!.set(e.e, e.v);
           exposures.push({
             experiment_id: e.e,
             anon_id: anon,
@@ -185,10 +205,26 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
       case "id":
         deps.writer.identities([{ anon_id: anon, user_id: e.u }]);
         break;
+      case "cwv": {
+        // One value per metric and page per batch (the beacon sends each once per page view).
+        const k = `${e.m}\u0000${normalizePath(e.p)}`;
+        if (vitalsValueOk(e.m, e.v) && !cwv.has(k)) cwv.set(k, e.v);
+        break;
+      }
+    }
+  }
+  const day = utcDay(now);
+  const vitals: VitalsRow[] = [];
+  for (const [k, v] of cwv) {
+    const [m, p] = k.split("\u0000") as [VitalsMetric, string];
+    const bin = binFor(m, v);
+    for (const [experiment_id, variant_id] of pairs.get(p) ?? []) {
+      vitals.push({ experiment_id, variant_id, metric: m, day, bin, count: 1 });
     }
   }
   deps.writer.exposures(exposures);
   deps.writer.events(rows);
-  deps.writer.usage(utcDay(now), testedPageviews);
+  deps.writer.usage(day, testedPageviews);
+  deps.writer.vitals(vitals);
   return 204;
 }

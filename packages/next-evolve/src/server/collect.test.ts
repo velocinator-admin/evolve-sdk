@@ -195,3 +195,86 @@ describe("collect", () => {
     expect(w.rows.events[0]?.props).toBeNull();
   });
 });
+
+describe("collect: Core Web Vitals (protocol 1.1.0)", () => {
+  const exp = (e: string, v: string, p = "/") => ({ t: "exp", e, v, p });
+  const cwv = (m: string, v: unknown, p = "/") => ({ t: "cwv", m, v, p });
+  const vitals = () =>
+    w.rows.vitals.map((r) => `${r.experiment_id}:${r.variant_id}:${r.metric}:${r.day}:${r.bin}`);
+
+  it("bins each metric for every counted pair the batch reports on that page", async () => {
+    await handleCollect(
+      req({
+        v: 1,
+        events: [
+          exp("k3j9x2", "c1d2e3", "/pricing"),
+          exp("p7q8r9", "s4t5u6", "/pricing"),
+          cwv("lcp", 1200, "/pricing"),
+          cwv("cls", 0.12, "/pricing"),
+          cwv("inp", 180, "/pricing"),
+        ],
+      }),
+      deps,
+    );
+    expect(vitals()).toEqual([
+      "k3j9x2:c1d2e3:lcp:2026-10-31:4",
+      "p7q8r9:s4t5u6:lcp:2026-10-31:4",
+      "k3j9x2:c1d2e3:cls:2026-10-31:6",
+      "p7q8r9:s4t5u6:cls:2026-10-31:6",
+      "k3j9x2:c1d2e3:inp:2026-10-31:9",
+      "p7q8r9:s4t5u6:inp:2026-10-31:9",
+    ]);
+    expect(w.rows.vitals.every((r) => r.count === 1)).toBe(true);
+    // Counts only: no visitor id travels with vitals.
+    expect(Object.keys(w.rows.vitals[0]!).sort()).toEqual(
+      ["bin", "count", "day", "experiment_id", "metric", "variant_id"].sort(),
+    );
+  });
+
+  it("ignores vitals without a known counted pair on the same page", async () => {
+    await handleCollect(
+      req({
+        v: 1,
+        events: [
+          exp("k3j9x2", "zzzzzz"), // not in the bundle
+          exp("p7q8r9", "c1d2e3"), // variant of another experiment
+          exp("k3j9x2", "c1d2e3", "/pricing"), // another page
+          cwv("lcp", 900),
+        ],
+      }),
+      deps,
+    );
+    expect(vitals()).toEqual([]);
+    await handleCollect(req({ v: 1, events: [cwv("lcp", 900)] }), deps);
+    expect(vitals()).toEqual([]);
+  });
+
+  it("drops out-of-range and malformed values, unknown metrics and repeats", async () => {
+    await handleCollect(
+      req({
+        v: 1,
+        events: [
+          exp("k3j9x2", "a8f2l1"),
+          cwv("lcp", -1),
+          cwv("lcp", 600_001),
+          cwv("inp", "100"),
+          cwv("cls", 10.5),
+          cwv("fcp", 100),
+          cwv("inp", 600_000),
+          cwv("inp", 40), // second INP for the page: ignored
+          cwv("cls", 0),
+        ],
+      }),
+      deps,
+    );
+    expect(vitals()).toEqual(["k3j9x2:a8f2l1:inp:2026-10-31:20", "k3j9x2:a8f2l1:cls:2026-10-31:0"]);
+  });
+
+  it("stores nothing for bots, preview sessions and visitors without an id", async () => {
+    const batch = { v: 1, events: [exp("k3j9x2", "c1d2e3"), cwv("lcp", 1000)] };
+    await handleCollect(req(batch, { "user-agent": "Googlebot/2.1" }), deps);
+    await handleCollect(req(batch, { cookie: `evolve_id=${ANON}; evolve_pv=tok` }), deps);
+    await handleCollect(req(batch, { cookie: "" }), deps);
+    expect(vitals()).toEqual([]);
+  });
+});
