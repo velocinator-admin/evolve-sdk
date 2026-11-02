@@ -4,7 +4,7 @@ import { sampleBundle } from "../../test/samples";
 import { defineConfig, resolveConfig } from "../config/config";
 import { defineGoals } from "../config/goals";
 import { createBotDetector } from "../core/bots";
-import { type CollectDeps, handleCollect } from "./collect";
+import { type CollectDeps, createBundleRefresher, handleCollect } from "./collect";
 
 const ANON = "AAAAAAAAAAAAAAAAAAAAAA";
 const UA =
@@ -83,6 +83,63 @@ describe("collect", () => {
     ]);
     expect(w.rows.events[1]?.goal_values).toEqual({ paid: 20 });
     expect(w.rows.identities).toEqual([{ anon_id: ANON, user_id: "user_1" }]);
+  });
+
+  it("re-reads the bundle when a beacon names an experiment this instance doesn't know yet", async () => {
+    // A cold serverless instance (no bundle yet) or one that hasn't polled since a
+    // start: without a refresh it would drop the exposure the proxy just assigned.
+    let current: ReturnType<typeof sampleBundle> | null = null;
+    let refreshes = 0;
+    deps.bundle = () => current;
+    deps.refreshBundle = async () => {
+      refreshes++;
+      current = sampleBundle();
+    };
+    await handleCollect(
+      req({
+        v: 1,
+        events: [
+          { t: "pv", p: "/" },
+          { t: "exp", e: "k3j9x2", v: "c1d2e3", p: "/" },
+        ],
+      }),
+      deps,
+    );
+    expect(refreshes).toBe(1);
+    expect(w.rows.exposures.map((e) => e.variant_id)).toEqual(["c1d2e3"]);
+    expect(w.rows.usage.get("2026-10-31")).toBe(1);
+
+    // Known pairs (and batches without exposures) don't refresh.
+    await handleCollect(
+      req({ v: 1, events: [{ t: "exp", e: "k3j9x2", v: "c1d2e3", p: "/" }] }),
+      deps,
+    );
+    await handleCollect(
+      req({ v: 1, events: [{ t: "ev", n: "purchase", props: { amount: 1 } }] }),
+      deps,
+    );
+    expect(refreshes).toBe(1);
+  });
+
+  it("refreshes for unknown exposures at most once per interval and waits at most the cap", async () => {
+    let t = 0;
+    let calls = 0;
+    const never = new Promise<void>(() => {});
+    const refresh = createBundleRefresher(
+      () => {
+        calls++;
+        return calls === 1 ? Promise.resolve() : never;
+      },
+      { minIntervalMs: 5_000, capMs: 20, now: () => t },
+    );
+    await refresh();
+    await refresh(); // within the interval: no fetch
+    expect(calls).toBe(1);
+    t = 5_000;
+    const started = Date.now();
+    await refresh(); // hangs → capped
+    expect(calls).toBe(2);
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 
   it("counts page views on a running experiment's route only", async () => {

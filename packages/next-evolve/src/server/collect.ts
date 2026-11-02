@@ -37,10 +37,43 @@ export type CollectDeps = {
   config: ResolvedConfig;
   goals: Goals | undefined;
   bundle: () => BundlePayload | null;
+  /**
+   * Fetches the bundle now (see {@link createBundleRefresher}). Called when a
+   * beacon names an experiment/variant the current bundle doesn't know, so a
+   * cold or stale instance doesn't drop an exposure the proxy just assigned.
+   */
+  refreshBundle?: () => Promise<void>;
   isBot: (ua: string | null) => boolean;
   writer: Writer;
   now?: () => Date;
 };
+
+/**
+ * Wraps a store refresh for collect: at most one fetch per `minIntervalMs` per
+ * instance (forged beacons with made-up ids can't turn into a cloud fetch each),
+ * and never waits longer than `capMs`.
+ */
+export function createBundleRefresher(
+  refresh: () => Promise<void>,
+  opts: { minIntervalMs?: number; capMs?: number; now?: () => number } = {},
+): () => Promise<void> {
+  const minIntervalMs = opts.minIntervalMs ?? 5_000;
+  const capMs = opts.capMs ?? 2_000;
+  const now = opts.now ?? Date.now;
+  let last = -Infinity;
+  return async () => {
+    if (now() - last < minIntervalMs) return;
+    last = now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      refresh().catch(() => {}),
+      new Promise<void>((r) => {
+        timer = setTimeout(r, capMs);
+      }),
+    ]);
+    clearTimeout(timer);
+  };
+}
 
 /** Same-origin check: `Origin` must match the host; without it, `Sec-Fetch-Site` must say so. */
 export function isSameOrigin(req: Request): boolean {
@@ -98,7 +131,15 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
     return r.success ? [r.data] : [];
   });
   const now = deps.now?.() ?? new Date();
-  const bundle = deps.bundle();
+  let bundle = deps.bundle();
+  const known = (e: string, v: string) => {
+    const exp = bundle?.routing.experiments[e];
+    return bundle?.variants[v]?.exp === e && Boolean(exp?.variants.some((x) => x.id === v));
+  };
+  if (deps.refreshBundle && events.some((e) => e.t === "exp" && !known(e.e, e.v))) {
+    await deps.refreshBundle();
+    bundle = deps.bundle();
+  }
   const exposures: ExposureRow[] = [];
   const rows: EventRow[] = [];
   let testedPageviews = 0;
@@ -107,9 +148,7 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
     switch (e.t) {
       case "exp": {
         // Only pairs the local bundle knows about; anything else is noise or forgery.
-        const v = bundle?.variants[e.v];
-        const exp = bundle?.routing.experiments[e.e];
-        if (v && exp && v.exp === e.e && exp.variants.some((x) => x.id === e.v)) {
+        if (known(e.e, e.v)) {
           exposures.push({
             experiment_id: e.e,
             anon_id: anon,
