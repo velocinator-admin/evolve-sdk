@@ -1,5 +1,12 @@
 # next-evolve
 
+## 0.3.1
+
+### Patch Changes
+
+- 38cbbbe: Collect no longer drops exposures on a cold or stale instance: when a beacon names an experiment the instance's bundle doesn't know yet, the route fetches the bundle (at most once per 5 s per instance, waiting at most 2 s) before validating.
+- 354d43c: Assignment is now deterministic per visitor and experiment (a hash of `evolve_id`), so concurrent first requests from one visitor, such as a link prefetch and the click that follows, can no longer assign two different variants and leave an exposure under the variant the visitor doesn't see.
+
 ## 0.3.0
 
 ### Minor Changes
