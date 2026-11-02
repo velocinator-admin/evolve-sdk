@@ -16,11 +16,21 @@ vi.mock("./render-bundle", () => ({
   getRenderBundle: (o?: { fresh?: boolean }) => getRenderBundle(o),
 }));
 vi.mock("next/navigation", () => ({ unstable_rethrow: () => {} }));
+const afterCalls: (() => unknown)[] = [];
+const afterImpl = { throws: false };
+vi.mock("next/server", () => ({
+  after: (fn: () => unknown) => {
+    if (afterImpl.throws) throw new Error("outside a request scope");
+    afterCalls.push(fn);
+  },
+}));
+const registerRegion = vi.fn(async (_r: unknown) => {});
+vi.mock("../cloud/regions", () => ({ registerRegion: (r: unknown) => registerRegion(r) }));
 vi.mock("next/headers", () => ({
   headers: async () => new Headers(headerCode.value ? { "x-evolve-a": headerCode.value } : {}),
 }));
 
-const { Optimizable } = await import("./region");
+const { Optimizable, scheduleRegistration } = await import("./region");
 const { optimizable } = await import("./optimizable");
 
 const heroSchema = z.object({
@@ -143,5 +153,47 @@ describe("<Optimizable>", () => {
   it("malformed code → control", async () => {
     ctx.code = "ev_nope";
     expect(inspect(await render())).toEqual([null, controlOut]);
+  });
+});
+
+describe("region registration", () => {
+  const meta = { jsonSchema: { type: "object" }, schemaHash: "h" };
+  beforeEach(() => {
+    afterCalls.length = 0;
+    afterImpl.throws = false;
+    registerRegion.mockClear();
+  });
+
+  it("calls after() from a timer, not during render (cacheComponents flags the clock read)", async () => {
+    vi.useFakeTimers();
+    try {
+      scheduleRegistration("hero", meta, { title: "x" }, "/");
+      expect(afterCalls).toHaveLength(0); // nothing synchronous in the render
+      await vi.runAllTimersAsync();
+      expect(afterCalls).toHaveLength(1);
+      await afterCalls[0]!();
+      expect(registerRegion).toHaveBeenCalledWith({
+        id: "hero",
+        jsonSchema: meta.jsonSchema,
+        schemaHash: "h",
+        controlProps: { title: "x" },
+        path: "/",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pushes directly when after() isn't available, and skips without a path", async () => {
+    vi.useFakeTimers();
+    try {
+      afterImpl.throws = true;
+      scheduleRegistration("hero", meta, {}, "/");
+      scheduleRegistration("hero", meta, {}, null);
+      await vi.runAllTimersAsync();
+      expect(registerRegion).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -113,7 +113,8 @@ export function detectProject(root: string): Detection {
   if (cacheComponents) {
     problems.push({
       level: "warn",
-      message: "cacheComponents is on: static-mode pages are untested with it; prefer dynamic mode",
+      message:
+        "cacheComponents is on: Evolve uses dynamic mode (static mode doesn't work with it); wrap <Optimizable> in <Suspense>",
     });
   }
 

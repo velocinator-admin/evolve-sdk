@@ -79,7 +79,15 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
       .fetcher(etag)
       .then((res) => {
         if (res.status === "ok") load(res.token);
-        else if (res.status === "error") {
+        else if (res.status === "error" && res.code === 404 && res.message?.includes("no_bundle")) {
+          // A new site before its first started experiment: normal, so say what it means.
+          logRateLimited(
+            "fetch:no_bundle",
+            "no bundle yet (no experiment has started): serving control",
+            undefined,
+            3_600_000,
+          );
+        } else if (res.status === "error") {
           logRateLimited(`fetch:${res.code}`, `bundle fetch failed (${res.code})`, res.message);
         }
       })

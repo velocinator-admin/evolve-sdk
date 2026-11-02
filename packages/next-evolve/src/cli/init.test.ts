@@ -88,6 +88,42 @@ describe("next-evolve init (spec §16.1)", () => {
     expect(r.runCmd).not.toHaveBeenCalled(); // already installed
   });
 
+  it("a create-next-app 16.4 project (cacheComponents, one-line <body>): dynamic mode, script added, <Suspense> hint", async () => {
+    const dir = freshApp({
+      "next.config.ts":
+        "const nextConfig = { cacheComponents: true };\nexport default nextConfig;\n",
+      "app/layout.tsx": `import "./globals.css";
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html lang="en">
+      <body className="min-h-full flex flex-col">{children}</body>
+    </html>
+  );
+}
+`,
+    });
+    const r = await run(dir, [...keys, "--yes"]);
+    expect(r.code, r.text).toBe(0);
+    expect(read(dir, "evolve.config.ts")).toContain('"/": { mode: "dynamic" }');
+    expect(existsSync(join(dir, "app/page.tsx"))).toBe(true); // not moved under [evolve]
+    expect(existsSync(join(dir, "app/[evolve]"))).toBe(false);
+    const layout = read(dir, "app/layout.tsx");
+    expect(layout).toContain('import { EvolveScript } from "next-evolve/client";');
+    expect(layout).toContain(
+      '<body className="min-h-full flex flex-col">{children}<EvolveScript /></body>',
+    );
+    expect(r.text).not.toContain("Add <EvolveScript />");
+    expect(r.text).toContain("<Suspense><Optimizable");
+
+    const forced = await run(
+      freshApp({ "next.config.ts": "export default { cacheComponents: true };\n" }),
+      [...keys, "--yes", "--mode", "static"],
+    );
+    expect(forced.code).toBe(1);
+    expect(forced.text).toMatch(/static mode doesn't work with it/);
+  });
+
   it("installs next-evolve and zod with the app's package manager when missing", async () => {
     const dir = freshApp();
     const pkg = JSON.parse(read(dir, "package.json"));

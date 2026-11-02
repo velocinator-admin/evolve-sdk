@@ -143,12 +143,15 @@ export function planLayout(plan: Plan, d: Detection): void {
   const src = plan.read(f)!;
   if (src.includes("EvolveScript")) return;
   const m = /^([ \t]*)<\/body>/m.exec(src);
-  if (!m) {
+  let withTag: string;
+  if (m) withTag = src.replace(m[0], `${m[1]}  <EvolveScript />\n${m[0]}`);
+  else if (src.split("</body>").length === 2) {
+    // `<body className="…">{children}</body>` on one line (create-next-app).
+    withTag = src.replace("</body>", "<EvolveScript /></body>");
+  } else {
     plan.manual.push(`Add <EvolveScript /> (from "next-evolve/client") inside <body> in ${f}.`);
     return;
   }
-  const indent = `${m[1]}  `;
-  const withTag = src.replace(m[0], `${indent}<EvolveScript />\n${m[0]}`);
   plan.write(f, addImport(withTag, `import { EvolveScript } from "next-evolve/client";`));
 }
 

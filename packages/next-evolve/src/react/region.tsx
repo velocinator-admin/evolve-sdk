@@ -51,27 +51,36 @@ async function currentPath(): Promise<string | null> {
   }
 }
 
-/** Region registration (spec §5.2): after the response, deduped per process, errors swallowed. */
-function scheduleRegistration(
+/**
+ * Region registration (spec §5.2): after the response, deduped per process,
+ * errors swallowed. `after()` is called from a timer, not during render: with
+ * `cacheComponents` on, Next flags the clock read inside `after()` as
+ * non-deterministic prerender I/O (a dev error overlay). Outside a request
+ * scope (tests, some build steps) the push runs directly, still in the
+ * background.
+ */
+export function scheduleRegistration(
   id: string,
   meta: { jsonSchema: Record<string, unknown>; schemaHash: string },
   controlProps: Record<string, unknown>,
   path: string | null,
 ): void {
   if (!path) return;
-  try {
-    after(() =>
-      registerRegion({
-        id,
-        jsonSchema: meta.jsonSchema,
-        schemaHash: meta.schemaHash,
-        controlProps,
-        path,
-      }),
-    );
-  } catch {
-    // Outside a request scope (tests, some build steps): skip; a later render registers it.
-  }
+  const run = () =>
+    registerRegion({
+      id,
+      jsonSchema: meta.jsonSchema,
+      schemaHash: meta.schemaHash,
+      controlProps,
+      path,
+    });
+  setTimeout(() => {
+    try {
+      after(run);
+    } catch {
+      void run().catch(() => {});
+    }
+  }, 0);
 }
 
 function findPair(bundle: BundlePayload | null, pairs: CodePair[], region: string) {

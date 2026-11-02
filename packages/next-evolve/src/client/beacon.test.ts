@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _reset, COLLECT_URL, flush, identify, push, track } from "./beacon";
+import { _reset, COLLECT_URL, flush, identify, push, track, watchExposures } from "./beacon";
 
 let sent: { url: string; body: unknown }[];
 beforeEach(() => {
@@ -66,5 +66,44 @@ describe("beacon queue", () => {
     push({ t: "pv", p: "/" });
     flush();
     expect(sent).toEqual([]);
+  });
+});
+
+describe("watchExposures", () => {
+  type El = { getAttribute: (n: string) => string | null };
+  const region = (e: string, v: string): El => ({
+    getAttribute: (n) => (n === "data-evolve-e" ? e : n === "data-evolve-v" ? v : null),
+  });
+  let dom: El[];
+  beforeEach(() => {
+    dom = [];
+    vi.stubGlobal("document", { querySelectorAll: () => dom });
+  });
+  const exposures = () =>
+    sent
+      .flatMap((s) => (s.body as { events: { t: string; e?: string }[] }).events)
+      .filter((e) => e.t === "exp");
+
+  it("counts regions that stream in after the first scan (Suspense), once each", () => {
+    dom = [region("exp001", "var001")];
+    const stop = watchExposures("/");
+    dom = [region("exp001", "var001"), region("exp002", "var002")]; // streamed in later
+    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(3000);
+    flush();
+    expect(exposures()).toEqual([
+      { t: "exp", e: "exp001", v: "var001", p: "/" },
+      { t: "exp", e: "exp002", v: "var002", p: "/" },
+    ]);
+    stop();
+  });
+
+  it("stops looking after a route change", () => {
+    const stop = watchExposures("/");
+    stop();
+    dom = [region("exp003", "var003")];
+    vi.advanceTimersByTime(5000);
+    flush();
+    expect(exposures()).toEqual([]);
   });
 });

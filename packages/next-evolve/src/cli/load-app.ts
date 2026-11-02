@@ -63,7 +63,7 @@ export function reexecWithTypes(
       ...args,
     ],
     {
-      stdio: ["ignore", quiet ? "ignore" : "inherit", "inherit"],
+      stdio: ["ignore", quiet ? "ignore" : "inherit", quiet ? "ignore" : "inherit"],
       cwd,
       env: { ...process.env, ...env },
     },

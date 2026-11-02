@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
-import { flush, push } from "./beacon";
+import { flush, push, watchExposures } from "./beacon";
 
 /**
  * Evolve beacon. Place once in the root layout. Not needed to show a variant.
@@ -38,15 +38,7 @@ export function EvolveScript(): null {
   useEffect(() => {
     const p = location.pathname;
     push({ t: "pv", p });
-    const seen = new Set<string>();
-    for (const el of document.querySelectorAll("[data-evolve-e]:not([data-evolve-x])")) {
-      const e = el.getAttribute("data-evolve-e");
-      const v = el.getAttribute("data-evolve-v");
-      if (e && v && !seen.has(e)) {
-        seen.add(e);
-        push({ t: "exp", e, v, p });
-      }
-    }
+    return watchExposures(p);
   }, [path]);
 
   return null;

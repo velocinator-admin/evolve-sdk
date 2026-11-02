@@ -89,9 +89,17 @@ export async function initCommand(args: string[], deps: InitDeps): Promise<numbe
     `✓ Next.js ${d.nextVersion} · ${d.appDir}/ · ${d.typescript ? "TypeScript" : "JavaScript"} · ${d.packageManager}`,
   );
 
-  const mode = f.mode ?? "static";
+  // cacheComponents (on in new create-next-app projects) rejects the segment
+  // config static mode writes (revalidate, dynamicParams), so use dynamic.
+  const mode = f.mode ?? (d.cacheComponents ? "dynamic" : "static");
   if (mode !== "static" && mode !== "dynamic") {
     err('next-evolve init: --mode is "static" or "dynamic"');
+    return 1;
+  }
+  if (d.cacheComponents && mode === "static") {
+    err(
+      "✗ cacheComponents is on, and static mode doesn't work with it: use --mode dynamic (the default with cacheComponents)",
+    );
     return 1;
   }
   const paths = (f.routes ?? "/").split(/[\s,]+/).filter(Boolean);
@@ -239,7 +247,9 @@ export async function initCommand(args: string[], deps: InitDeps): Promise<numbe
     ...(added.length && !dry
       ? [`In production, set ${added.join(", ")} (they're in .env.local now)`]
       : []),
-    `Wrap a component: <Optimizable id="hero" component={Hero} props={...} /> (from "next-evolve")`,
+    d.cacheComponents
+      ? `Wrap a component: <Suspense><Optimizable id="hero" component={Hero} props={...} /></Suspense> (Optimizable from "next-evolve"; cacheComponents needs the <Suspense>)`
+      : `Wrap a component: <Optimizable id="hero" component={Hero} props={...} /> (from "next-evolve")`,
     "Visit the page once so the region registers, then open the dashboard",
     ...(f["app-url"]
       ? ["After you deploy: npx next-evolve connect --test"]

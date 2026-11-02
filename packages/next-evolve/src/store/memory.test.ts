@@ -61,6 +61,17 @@ function setup(opts: { initial?: string; pollMs?: number; random?: number } = {}
 }
 
 describe("memory bundle store", () => {
+  it("a new site's 404 no_bundle logs what it means, not a failure", async () => {
+    const s = setup();
+    s.store.peek();
+    await s.reply({ status: "error", code: 404, message: '{"error":"no_bundle"}' });
+    expect(s.errors).toHaveBeenCalledWith(
+      "[evolve] no bundle yet (no experiment has started): serving control",
+    );
+    expect(String(s.errors.mock.calls)).not.toContain("bundle fetch failed");
+    expect(s.store.peek()).toBeNull();
+  });
+
   it("never blocks: peek returns at once while the first fetch is pending", async () => {
     const s = setup();
     const waited: Promise<unknown>[] = [];
