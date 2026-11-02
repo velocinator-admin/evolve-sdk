@@ -1,5 +1,11 @@
 # next-evolve
 
+## 0.4.1
+
+### Patch Changes
+
+- 7b1cbd5: "no bundle yet (no experiment has started): serving control" now logs with `console.info` instead of `console.error`, so Vercel no longer shows a new site's normal state as an error.
+
 ## 0.4.0
 
 ### Minor Changes
