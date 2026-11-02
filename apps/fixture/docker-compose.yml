@@ -1,0 +1,42 @@
+# T12.3: the fixture on Docker with its own Postgres, against a real Evolve cloud.
+#   EVOLVE_SECRET_KEY=… EVOLVE_WEBHOOK_SECRET=… EVOLVE_APP_URL=https://… \
+#     docker compose -f apps/fixture/docker-compose.yml up --build -d
+# The cloud only calls public https app URLs, so put a tunnel or proxy in front of :3300.
+name: evolve-fixture
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: evolve
+      POSTGRES_PASSWORD: evolve
+      POSTGRES_DB: fixture
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolve -d fixture"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  app:
+    build:
+      context: ../..
+      dockerfile: apps/fixture/Dockerfile
+      secrets:
+        - evolve_secret_key
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      EVOLVE_SECRET_KEY: ${EVOLVE_SECRET_KEY:?set EVOLVE_SECRET_KEY}
+      EVOLVE_WEBHOOK_SECRET: ${EVOLVE_WEBHOOK_SECRET:?set EVOLVE_WEBHOOK_SECRET}
+      EVOLVE_APP_URL: ${EVOLVE_APP_URL:-}
+      EVOLVE_CLOUD_URL: ${EVOLVE_CLOUD_URL:-https://api.evolveab.com}
+      EVOLVE_DATABASE_URL: postgres://evolve:evolve@db:5432/fixture
+    ports:
+      - "3300:3000"
+    restart: unless-stopped
+secrets:
+  evolve_secret_key:
+    environment: EVOLVE_SECRET_KEY
+volumes:
+  db:

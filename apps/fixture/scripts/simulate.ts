@@ -37,6 +37,8 @@ export type SimulateResult = {
   /** Per `exp:variant`: visitors exposed and conversions sent. */
   arms: Record<string, { n: number; c: number }>;
   errors: number;
+  /** Error messages and how often each happened (e.g. a host's bot challenge: "page 403 …"). */
+  errorReasons?: Record<string, number>;
   /** With `keepIds`: anon ids per `exp:variant`, and the ones that converted. */
   ids?: Record<string, { all: string[]; converted: string[] }>;
 };
@@ -145,8 +147,11 @@ export async function simulate(o: SimulateOptions): Promise<SimulateResult> {
       next++;
       try {
         await visit();
-      } catch {
+      } catch (e) {
         result.errors++;
+        const why = e instanceof Error ? e.message : String(e);
+        result.errorReasons ??= {};
+        result.errorReasons[why] = (result.errorReasons[why] ?? 0) + 1;
       }
     }
   };

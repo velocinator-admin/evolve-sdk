@@ -1,0 +1,18 @@
+# `vercel deploy` from a checkout (the fixture projects, T12.3) uploads the repo;
+# keep build output, local env files and test artifacts out.
+.git
+node_modules
+.env*
+!.env.example
+dist
+.next
+.next-baseline
+.turbo
+coverage
+*.tsbuildinfo
+.evolve
+test-results
+playwright-report
+.evolve-cache
+.init-*
+.vercel
