@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { serializedGoalSchema } from "./goals";
 import { GOAL_KEY_RE, ID_RE, REQUEST_ID_RE, SITE_ID_RE } from "./ids";
+import { MAX_VITALS_ROWS, vitalsRequestSchema, vitalsRowSchema } from "./vitals";
 
 export const MAX_EXPERIMENTS_PER_REQUEST = 5;
 export const MAX_GOALS_PER_EXPERIMENT = 20;
@@ -41,6 +42,8 @@ export const aggregateRequestSchema = z.looseObject({
     )
     .max(MAX_EXPERIMENTS_PER_REQUEST),
   usageFrom: isoDay.nullable(),
+  /** Protocol 1.1.0: absent = don't send vitals (spec §9.3). SDKs before 0.5 ignore it. */
+  vitals: vitalsRequestSchema.optional(),
 });
 export type AggregateRequest = z.infer<typeof aggregateRequestSchema>;
 
@@ -89,6 +92,8 @@ export const aggregateResponseSchema = z.looseObject({
       message: z.string().max(1000),
     }),
   ),
+  /** Protocol 1.1.0: only when the request asked for `vitals` and the query succeeded. */
+  vitals: z.array(vitalsRowSchema).max(MAX_VITALS_ROWS).optional(),
 });
 export type AggregateResponse = z.infer<typeof aggregateResponseSchema>;
 

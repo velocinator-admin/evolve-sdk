@@ -12,3 +12,4 @@ export * from "./preview";
 export * from "./sync";
 export * from "./verify-bundle";
 export * from "./version";
+export * from "./vitals";

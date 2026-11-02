@@ -159,6 +159,9 @@ importers:
       fast-check:
         specifier: ^4.10.2
         version: 4.10.2
+      protocol-1.0.0:
+        specifier: npm:@next-evolve/protocol@1.0.0
+        version: '@next-evolve/protocol@1.0.0'
 
 packages:
 
@@ -486,6 +489,10 @@ packages:
   '@manypkg/tools@2.1.2':
     resolution: {integrity: sha512-6QEf6yqFbETdwGITKq57aYoPfX/3K8XFNwsAlx0C1M7o8cb79sv1M3w+tWuWvIcSbNqrLF7OD7YpZMVVz335hQ==}
     engines: {node: '>=20.0.0'}
+
+  '@next-evolve/protocol@1.0.0':
+    resolution: {integrity: sha512-LfIzJ31cqTSMSMUIbpCz+gTRlHtEVCg8FT54dvnH9MRRqt0m+m9cpjFeAPjD0jKrihX7Zg6JQ0ZJtypeyN0smQ==}
+    engines: {node: '>=22.12'}
 
   '@next/env@15.5.28':
     resolution: {integrity: sha512-xxW5EBI8fMPuVTPBW7LL980IRbuDXlbkUAwp9DDhtb4Lnich3nJ13uYpvrX4VE74hWPf6AvHHAMmGCidcHjbfg==}
@@ -1730,6 +1737,10 @@ snapshots:
       jju: 1.4.0
       tinyglobby: 0.2.17
       yaml: 2.9.1
+
+  '@next-evolve/protocol@1.0.0':
+    dependencies:
+      zod: 4.6.7
 
   '@next/env@15.5.28': {}
 

@@ -1,6 +1,7 @@
 // Regenerates fixtures/v1/*.json. Run: pnpm --filter @next-evolve/protocol fixtures
 import { writeFileSync } from "node:fs";
 import { computeBundleHash } from "../src/bundle";
+import { VITALS_BINS, type VitalsMetric } from "../src/vitals";
 
 const dir = new URL("../fixtures/v1/", import.meta.url);
 const write = (name: string, value: unknown) =>
@@ -80,7 +81,7 @@ const goal = (event: string, extra = {}) => ({
   direction: "increase",
   ...extra,
 });
-write("aggregate-request.json", {
+const aggregateRequest = {
   type: "aggregate.request",
   pv: 1,
   requestId: "agr_7f3kq9w2m4x8z1c5v6b7n0aa",
@@ -121,7 +122,10 @@ write("aggregate-request.json", {
     },
   ],
   usageFrom: "2026-11-30",
-});
+};
+write("aggregate-request.json", aggregateRequest);
+// Protocol 1.1.0: the same messages plus vitals (1.0.0 readers ignore the field).
+write("aggregate-request-vitals.json", { ...aggregateRequest, vitals: { from: "2026-11-20" } });
 
 const r = (v: string, goalKey: string, day: string, n: number, c: number, s1 = 0, s2 = 0) => ({
   exp: "k3j9x2",
@@ -138,7 +142,7 @@ const r = (v: string, goalKey: string, day: string, n: number, c: number, s1 = 0
   ms1: s1,
   ms2: s2,
 });
-write("aggregate-response.json", {
+const aggregateResponse = {
   pv: 1,
   requestId: "agr_7f3kq9w2m4x8z1c5v6b7n0aa",
   site: "site_ab12cd34ef",
@@ -157,4 +161,32 @@ write("aggregate-response.json", {
   ],
   usage: [{ day: "2026-11-30", testedPageviews: 5120 }],
   errors: [],
+};
+write("aggregate-response.json", aggregateResponse);
+
+/** A histogram with `counts` placed from bin `at` on; the rest zero. */
+const hist = (metric: VitalsMetric, at: number, counts: number[]) => {
+  const bins = new Array<number>(VITALS_BINS[metric].length + 1).fill(0);
+  counts.forEach((n, i) => {
+    bins[at + i] = n;
+  });
+  return bins;
+};
+const vitalsRow = (v: string, metric: VitalsMetric, bins: number[]) => ({
+  exp: "k3j9x2",
+  var: v,
+  metric,
+  day: "2026-11-20",
+  bins,
+});
+write("aggregate-response-vitals.json", {
+  ...aggregateResponse,
+  vitals: [
+    vitalsRow("a8f2l1", "lcp", hist("lcp", 4, [40, 120, 90, 60, 30, 12])),
+    vitalsRow("a8f2l1", "cls", hist("cls", 0, [210, 80, 40, 12])),
+    vitalsRow("a8f2l1", "inp", hist("inp", 2, [30, 60, 25, 8, 3])),
+    vitalsRow("c1d2e3", "lcp", hist("lcp", 8, [35, 80, 110, 90, 40, 20])),
+    vitalsRow("c1d2e3", "cls", hist("cls", 0, [190, 90, 45, 15])),
+    vitalsRow("f4g5h6", "lcp", hist("lcp", 4, [45, 110, 95, 55, 28, 10])),
+  ],
 });
