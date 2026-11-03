@@ -11,8 +11,16 @@ const state = async (request: import("@playwright/test").APIRequestContext) =>
 // T6.7: the app pushes its manifest at startup (registerEvolve) and registers
 // each region after rendering it. Configuration only, no visitor data.
 test("manifest and regions reach the cloud", async ({ request }) => {
+  // registerEvolve pushes in the background (0.5.1), so poll for it.
+  await expect
+    .poll(
+      async () => Object.keys((await state(request)).manifests[TEST_SITE]?.routes ?? {}).sort(),
+      {
+        timeout: 10_000,
+      },
+    )
+    .toEqual(["/", "/features", "/pricing", "/slow"]);
   const m = (await state(request)).manifests[TEST_SITE];
-  expect(Object.keys(m?.routes ?? {}).sort()).toEqual(["/", "/features", "/pricing", "/slow"]);
   expect(Object.keys(m?.goals ?? {}).length).toBeGreaterThan(0);
 
   await request.get("/");

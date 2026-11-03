@@ -11,7 +11,7 @@ import { computeManifestHash } from "@next-evolve/protocol";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { defineConfig } from "../config/config";
 import { defineGoals } from "../config/goals";
-import { registerEvolve, resetRegisterEvolve } from "../instrumentation";
+import { pendingManifestPush, registerEvolve, resetRegisterEvolve } from "../instrumentation";
 import { resetBundleStores } from "../store/runtime";
 import { buildManifest, detectAppUrl } from "./manifest";
 import { pushToCloud } from "./push";
@@ -62,8 +62,29 @@ describe("manifest", () => {
   it("registerEvolve pushes it once per process", async () => {
     await registerEvolve({ config, goals });
     await registerEvolve({ config, goals });
+    await pendingManifestPush();
     expect(cloud.manifests.get(TEST_SITE)?.goals.signup).toMatchObject({ event: "signup" });
     expect(cloud.calls.filter((c) => c.path === "/v1/manifest")).toHaveLength(1);
+  });
+
+  it("registerEvolve doesn't wait for the cloud (Next awaits register() before the first request)", async () => {
+    // A cloud that accepts the connection and never answers.
+    const { createServer } = await import("node:http");
+    const hang = createServer(() => {});
+    await new Promise<void>((r) => hang.listen(0, "127.0.0.1", r));
+    const { port } = hang.address() as { port: number };
+    vi.stubEnv("EVOLVE_CLOUD_URL", `http://127.0.0.1:${port}`);
+    vi.stubEnv("VERCEL", "1"); // no background bundle poll in this test
+    try {
+      const t0 = performance.now();
+      await registerEvolve({ config, goals });
+      expect(performance.now() - t0).toBeLessThan(100);
+    } finally {
+      hang.closeAllConnections();
+      hang.close();
+      vi.stubEnv("EVOLVE_CLOUD_URL", cloud.url);
+      vi.stubEnv("VERCEL", "");
+    }
   });
 
   it("registerEvolve polls the bundle on an interval on long-running Node, not on Vercel", async () => {

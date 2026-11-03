@@ -21,7 +21,8 @@ let poll: ReturnType<typeof setInterval> | null = null;
  *   }
  *
  * Registers the goals for this process and pushes the manifest to the cloud
- * (goals, routes, versions, app URL; spec §8.4), once per process. On
+ * (goals, routes, versions, app URL; spec §8.4), once per process, in the
+ * background (it resolves without waiting for the cloud). On
  * long-running Node it also polls the bundle in the background (spec §7.5),
  * so the disk cache stays fresh between requests. Never throws.
  */
@@ -39,19 +40,31 @@ export async function registerEvolve(opts: RegisterEvolveOptions): Promise<void>
         poll.unref();
       }
     }
+    // Not awaited: Next awaits register() before an instance serves its first
+    // request, so awaiting the push would put a network call to the cloud (up
+    // to its 3 s timeout) in front of every cold instance's first request.
     const manifest = buildManifest(opts.config, opts.goals, { appUrl: detectAppUrl() });
-    const res = await pushToCloud("/v1/manifest", manifest);
-    if (!res.ok && res.status !== "no_key") {
-      console.error(`[evolve] manifest push failed (${res.status})`);
-    }
+    manifestPush = pushToCloud("/v1/manifest", manifest).then((res) => {
+      if (!res.ok && res.status !== "no_key") {
+        console.error(`[evolve] manifest push failed (${res.status})`);
+      }
+    });
   } catch (e) {
     console.error("[evolve] registerEvolve failed", e);
   }
 }
 
+let manifestPush: Promise<void> | null = null;
+
+/** Test helper: the background manifest push started by registerEvolve, if any. */
+export function pendingManifestPush(): Promise<void> {
+  return manifestPush ?? Promise.resolve();
+}
+
 /** Test helper. */
 export function resetRegisterEvolve(): void {
   registered = false;
+  manifestPush = null;
   if (poll) clearInterval(poll);
   poll = null;
 }

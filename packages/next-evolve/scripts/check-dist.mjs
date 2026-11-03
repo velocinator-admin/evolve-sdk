@@ -1,5 +1,6 @@
 // Fails the build if the unbundled output lost its module boundary markers.
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 
 const checks = [
   ["dist/client/evolve-script.js", (s) => s.startsWith('"use client"'), 'starts with "use client"'],
@@ -12,5 +13,13 @@ for (const [file, ok, what] of checks) {
     console.error(`check-dist: ${file} must ${what}`);
     failed = true;
   }
+}
+// next.config.ts compiles to CommonJS: next-evolve/config must load via require().
+try {
+  const mod = createRequire(import.meta.url)("next-evolve/config");
+  if (typeof mod.defineConfig !== "function") throw new Error("no defineConfig");
+} catch (e) {
+  console.error(`check-dist: require("next-evolve/config") failed: ${e.message}`);
+  failed = true;
 }
 if (failed) process.exit(1);

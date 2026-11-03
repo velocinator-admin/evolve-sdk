@@ -17,7 +17,8 @@
     },
     "./config": {
       "types": "./dist/config/index.d.ts",
-      "import": "./dist/config/index.js"
+      "import": "./dist/config/index.js",
+      "default": "./dist/config/index.js"
     },
     "./proxy": {
       "types": "./dist/proxy/index.d.ts",
