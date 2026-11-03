@@ -49,7 +49,7 @@ describe("ids", () => {
     const seen = new Set<string>();
     for (let i = 0; i < 1_000_000; i++) seen.add(newAnonId());
     expect(seen.size).toBe(1_000_000);
-  });
+  }, 30_000); // 1e6 draws + a 1e6 Set: ~11 s on a busy CI runner
 
   it("validates ids strictly", () => {
     expect(isId("k3j9x2")).toBe(true);
