@@ -10,7 +10,8 @@ import {
 import type { NextResponse } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOOGLEBOT, keys, request, storeWith } from "../../test/proxy-helpers";
-import { defineConfig } from "../config/config";
+import { cdnCookieName } from "../config/cdn";
+import { defineConfig, resolveConfig } from "../config/config";
 import { createMemoryStore } from "../store/memory";
 import { applyEvolve, createEvolveProxy } from "./proxy";
 
@@ -320,5 +321,65 @@ describe("createEvolveProxy", () => {
     }
     times.sort((a, b) => a - b);
     expect(times[Math.floor(times.length * 0.95)]).toBeLessThan(1 * SLACK);
+  });
+});
+
+describe("cdnRouting (repeat views skip the proxy)", () => {
+  const cdn = defineConfig({
+    routes: {
+      "/": { mode: "static" },
+      "/pricing": { mode: "static" },
+      "/features": { mode: "dynamic" },
+    },
+    cdnRouting: true,
+  });
+  const runCdn = (req: ReturnType<typeof request>, store = storeWith()) =>
+    applyEvolve(cdn, req, event, { store, random: fixed(0.75) });
+  const routeCookie = cdnCookieName("/");
+
+  it("sets the route cookie to the served code, expiring after the poll interval", () => {
+    const res = runCdn(request("/"));
+    expect(rewritten(res)).toBe("/ev_k3j9x2-c1d2e3");
+    expect(res!.cookies.get(routeCookie)).toMatchObject({
+      value: "ev_k3j9x2-c1d2e3",
+      maxAge: resolveConfig(cdn).pollSeconds,
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+    });
+    // The assignment cookies are unchanged.
+    expect(res!.cookies.get("evolve_a")?.value).toBe("k3j9x2:c1d2e3");
+  });
+
+  it("re-issues it for a returning visitor whose route cookie expired", () => {
+    const res = runCdn(
+      request("/", { cookies: { evolve_id: "Gspa9Q9OSdh6cZqKJa1VtA", evolve_a: "k3j9x2:a8f2l1" } }),
+    );
+    expect(rewritten(res)).toBe("/ev_k3j9x2-a8f2l1");
+    expect(res!.cookies.get(routeCookie)?.value).toBe("ev_k3j9x2-a8f2l1");
+    expect(res!.cookies.get("evolve_a")).toBeUndefined();
+  });
+
+  it("sets none when nothing runs there, for bots, without consent, or on dynamic routes", () => {
+    const none = storeWith((b) => {
+      b.routing.routes["/"] = [];
+    });
+    expect(runCdn(request("/"), none)!.headers.get("set-cookie")).toBeNull();
+    expect(runCdn(request("/", { ua: GOOGLEBOT }))!.headers.get("set-cookie")).toBeNull();
+    const noConsent = defineConfig({
+      routes: { "/": { mode: "static" } },
+      cdnRouting: true,
+      consent: () => false,
+    });
+    const r = applyEvolve(noConsent, request("/"), event, {
+      store: storeWith(),
+      random: fixed(0.75),
+    });
+    expect(r!.headers.get("set-cookie")).toBeNull();
+    expect(runCdn(request("/features"))!.cookies.get(cdnCookieName("/features"))).toBeUndefined();
+  });
+
+  it("is off by default", () => {
+    expect(run(request("/"))!.cookies.get(routeCookie)).toBeUndefined();
   });
 });

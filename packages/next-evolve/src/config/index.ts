@@ -1,5 +1,12 @@
 /** `next-evolve/config`: `defineConfig` and `defineGoals`. */
 export {
+  CDN_CODE_PATTERN,
+  cdnCookieName,
+  evolveMatcher,
+  evolveRewrites,
+  type MatcherEntry,
+} from "./cdn";
+export {
   defineConfig,
   type EvolveConfig,
   type ResolvedConfig,
