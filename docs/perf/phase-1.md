@@ -5,8 +5,8 @@ Targets (spec §6.6, §19 item 2; SRV-1.5, DATA-1.4):
 | Target | Result | Status |
 |---|---|---|
 | In-proxy p95 < 1 ms | 0.04–0.11 ms (`Server-Timing` on `next start`) | Met |
-| Added TTFB p95 < 5 ms on `next start` | 0.45–0.59 ms | Met |
-| Vercel number recorded | In-proxy p95 0.25 ms on Vercel (`Server-Timing`); added TTFB on a real site (T12.4, 4dfit.app): +19 ms p50 / +13 ms p95 vs. a page without the proxy, almost all of it Vercel's proxy invocation (in-proxy 0.12 ms); see below | Done (over the 5 ms TTFB budget on Vercel; platform cost) |
+| Added TTFB p95 < 5 ms on `next start` (the 5 ms budget covers in-proxy time and self-hosted `next start`) | 0.45–0.59 ms | Met |
+| Vercel number recorded | In-proxy p95 0.25 ms on Vercel (`Server-Timing`); added TTFB on a real site (T12.4, 4dfit.app): +19 ms p50 / +13 ms p95 vs. a page without the proxy, almost all of it Vercel's proxy invocation (in-proxy 0.12 ms); see below | Done. Vercel budget restated: ≈ +20 ms on a first view (the platform floor for any proxy; a no-op proxy measures the same), ≈ 0 on repeat views once opt-in `cdnRouting` ships ([proxy-overhead.md](proxy-overhead.md)) |
 | Aggregation p95 < 5 s at 50k exposures / 1M events | 0.66 s (visitor), 0.77 s (user) | Met |
 | Cloud job lag | ≤ 1 s inside a tick for 1,000 due jobs; the wait for a tick is the cron cadence | Recorded |
 
@@ -88,4 +88,4 @@ Vercel doesn't send `x-middleware-rewrite`, so the script maps the static routes
 | **Added TTFB** | **+19.3 ms** | **+12.7 ms** |
 | In-proxy (`Server-Timing: evolve;dur`) | 0.12 ms | |
 
-The Evolve code in the proxy takes ~0.1 ms; the rest is what Vercel charges for running any Node proxy (`proxy.ts`) in front of a CDN-cached page: the request goes to a function instead of straight from the edge cache. A no-op `proxy.ts` would show most of the same cost; measuring that (a second project with an empty proxy) would separate the two. The two pages differ in size (the TTFB excludes the body). The spec's 5 ms added-TTFB budget holds on `next start` (0.45–0.59 ms) but not on Vercel's proxy model; options for later: an Edge-runtime proxy, or testing only the routes that need it (already the case: only `/` is in the matcher).
+The Evolve code in the proxy takes ~0.1 ms; the rest is what Vercel charges for running any Node proxy (`proxy.ts`) in front of a CDN-cached page: the request goes to a function instead of straight from the edge cache. A no-op `proxy.ts` shows the same cost: measured at +18–23 ms, with Evolve within ±2 ms of it ([proxy-overhead.md](proxy-overhead.md)). The two pages differ in size (the TTFB excludes the body). The spec's 5 ms added-TTFB budget holds on `next start` (0.45–0.59 ms) and for in-proxy time; on Vercel it's restated as ≈ +20 ms on a first view and ≈ 0 on repeat views once `cdnRouting` ships. Edge runtime doesn't help (same Lambda, measured). Full analysis, the shipped fixes (0.5.1) and the unshipped `cdnRouting` prototype: [proxy-overhead.md](proxy-overhead.md).
