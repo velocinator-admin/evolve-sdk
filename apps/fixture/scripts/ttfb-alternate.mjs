@@ -9,6 +9,8 @@
 // dropped. Keep gapMs ≥ 100: one IP's rapid requests get challenged.
 import { readFileSync } from "node:fs";
 
+const print = (s) => process.stdout.write(`${s}\n`);
+
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -59,12 +61,12 @@ for (let r = 0; r < Number(rounds); r++) {
 }
 
 const base = data[targets[0].name];
-console.log("| target | n | TTFB p50 | p95 | added p50 | added p95 | in-proxy p50 | cache |");
-console.log("|---|---|---|---|---|---|---|---|");
+print("| target | n | TTFB p50 | p95 | added p50 | added p95 | in-proxy p50 | cache |");
+print("|---|---|---|---|---|---|---|---|");
 for (const [name, d] of Object.entries(data)) {
   const p50 = q(d.ttfb, 0.5);
   const p95 = q(d.ttfb, 0.95);
-  console.log(
+  print(
     `| ${name} | ${d.ttfb.length} | ${p50.toFixed(1)} | ${p95.toFixed(1)} | ${(p50 - q(base.ttfb, 0.5)).toFixed(1)} | ${(p95 - q(base.ttfb, 0.95)).toFixed(1)} | ${d.st.length ? q(d.st, 0.5).toFixed(2) : "—"} | ${JSON.stringify(d.cache)} |`,
   );
 }
