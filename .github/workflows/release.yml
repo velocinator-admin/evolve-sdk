@@ -90,8 +90,16 @@ jobs:
           status=0
           for dir in packages/next-evolve packages/protocol; do
             name=$(jq -r .name $dir/package.json); ver=$(jq -r .version $dir/package.json)
-            npm view "$name@$ver" version >/dev/null 2>&1 || { echo "$name@$ver not on npm; skip"; continue; }
-            [ "$(npm view "$name" dist-tags.alpha 2>/dev/null)" = "$ver" ] && { echo "$name alpha = $ver already"; continue; }
+            # A version just published can take ~1 min to show in `npm view`
+            # (0.5.0 did); wait up to 3 min before deciding it isn't on npm.
+            # Only `release:` commits wait; other pushes check once.
+            found=0
+            for i in $(seq 1 18); do
+              npm view "$name@$ver" version --prefer-online >/dev/null 2>&1 && { found=1; break; }
+              case "$(git log -1 --format=%s)" in release:*) sleep 10 ;; *) break ;; esac
+            done
+            [ $found = 1 ] || { echo "$name@$ver not on npm; skip"; continue; }
+            [ "$(npm view "$name" dist-tags.alpha --prefer-online 2>/dev/null)" = "$ver" ] && { echo "$name alpha = $ver already"; continue; }
             enc=$(jq -rn --arg n "$name" '$n|@uri')
             token=$(curl -sf -X POST -H "Authorization: Bearer $oidc" \
               "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/$enc" | jq -r .token)
