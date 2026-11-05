@@ -35,6 +35,18 @@ jobs:
       - run: pnpm test --cache-dir=.turbo
       - run: pnpm --filter fixture check:server-only
 
+  audit:
+    # Cloud T19.3 F8 (Phase 1 review O7): known high/critical advisories in any dependency fail CI.
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: pnpm audit --audit-level high
+
   integration:
     name: Integration + e2e (customer Postgres)
     runs-on: ubuntu-latest
