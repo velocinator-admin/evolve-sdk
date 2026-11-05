@@ -7,6 +7,11 @@
 //   node --experimental-strip-types apps/fixture/scripts/simulate.ts \
 //     --url http://localhost:3100 --visitors 2000 --path / --goal signup_submit \
 //     --rate 0.05 --rate k3j9x2:bbbbbb=0.07 [--server-share 0.2 --track-secret …]
+//
+// Core Web Vitals (T19.5): `--lcp 1200 --lcp s1ow01:sb0000=2900 --views 3` also
+// reports an LCP per page view (log-normal around the arm's median, ms), each
+// view one beacon batch with the page's `exp` pairs and a `cwv` event, as the
+// browser beacon sends at pagehide. Without `--lcp` nothing changes.
 
 export type SimulateOptions = {
   /** Fixture base URL, e.g. http://localhost:3100. */
@@ -27,6 +32,12 @@ export type SimulateOptions = {
   /** Deterministic randomness, for tests. */
   seed?: number;
   userAgent?: string;
+  /** Median LCP (ms) per page view; set to report Core Web Vitals. */
+  lcp?: number;
+  /** Per-arm median LCP (ms), keyed `exp:variant` (or just `variant`). */
+  lcps?: Record<string, number>;
+  /** Page views per visitor (each a beacon batch with vitals; default 1). */
+  views?: number;
   /** Also return each visitor's anon id per arm (tests). */
   keepIds?: boolean;
   fetch?: typeof fetch;
@@ -56,6 +67,12 @@ function prng(seed: number) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/** A log-normal factor with median 1 (σ 0.3), from two uniform draws (Box–Muller). */
+function logNormal(random: () => number): number {
+  const z = Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
+  return Math.exp(0.3 * z);
 }
 
 function cookiesFrom(res: Response): Map<string, string> {
@@ -103,10 +120,20 @@ export async function simulate(o: SimulateOptions): Promise<SimulateResult> {
         if (r.status !== 204 && !r.ok) throw new Error(`collect ${r.status}`);
       });
 
-    await collect([
-      { t: "pv", p: path },
-      ...assigned.map(([e, v]) => ({ t: "exp", e, v, p: path })),
-    ]);
+    const lcpFor = (exp: string, variant: string) =>
+      o.lcps?.[`${exp}:${variant}`] ?? o.lcps?.[variant] ?? o.lcp;
+    const views = o.lcp === undefined ? 1 : Math.max(1, o.views ?? 1);
+    for (let view = 0; view < views; view++) {
+      const [first] = assigned;
+      const median = first ? lcpFor(first[0], first[1]) : o.lcp;
+      await collect([
+        { t: "pv", p: path },
+        ...assigned.map(([e, v]) => ({ t: "exp", e, v, p: path })),
+        ...(median === undefined
+          ? []
+          : [{ t: "cwv", m: "lcp", v: Math.round(median * logNormal(random)), p: path }]),
+      ]);
+    }
     // One draw per visitor: converts if it's under this visitor's arm rate
     // (the first experiment on the page decides; others ride along).
     const u = random();
@@ -167,6 +194,7 @@ function parseArgs(argv: string[]): SimulateOptions {
     rate: 0.05,
   };
   const rates: Record<string, number> = {};
+  const lcps: Record<string, number> = {};
   for (let i = 0; i < argv.length; i++) {
     const [flag, value] = [argv[i], argv[i + 1] ?? ""];
     i++;
@@ -189,6 +217,15 @@ function parseArgs(argv: string[]): SimulateOptions {
         else rates[value.slice(0, eq)] = Number(value.slice(eq + 1));
         break;
       }
+      case "--lcp": {
+        const eq = value.lastIndexOf("=");
+        if (eq < 0) o.lcp = Number(value);
+        else lcps[value.slice(0, eq)] = Number(value.slice(eq + 1));
+        break;
+      }
+      case "--views":
+        o.views = Number(value);
+        break;
       case "--server-share":
         o.serverShare = Number(value);
         break;
@@ -206,6 +243,7 @@ function parseArgs(argv: string[]): SimulateOptions {
     }
   }
   o.rates = rates;
+  if (Object.keys(lcps).length) o.lcps = lcps;
   return o;
 }
 

@@ -115,3 +115,43 @@ test("simulated visitors: exposures and conversions land locally and aggregate",
     expect(sum(v, "c")).toBeGreaterThanOrEqual(arm.c);
   }
 });
+
+// T19.5: the simulator can also report Core Web Vitals, as the beacon does at
+// pagehide (`exp` pairs + `cwv` in one batch per page view), so a CWV rollback
+// can be drilled with a few hundred page views per arm without a browser each.
+test("simulated page views report LCP per arm into vitals_daily", async () => {
+  test.setTimeout(120_000);
+  const EXP = "s1ow01";
+  const [CTRL, SLOW] = ["sa0000", "sb0000"];
+  await sql`delete from evolve.vitals_daily where experiment_id = ${EXP}`;
+  const r = await simulate({
+    url: APP_URL,
+    visitors: 40,
+    path: "/slow",
+    goal: "cta_click",
+    rate: 0,
+    lcp: 1200,
+    lcps: { [SLOW]: 2900 },
+    views: 3,
+    seed: 7,
+    concurrency: 4,
+  });
+  expect(r.errors).toBe(0);
+  const views = (v: string) => r.arms[`${EXP}:${v}`]!.n * 3;
+  const rows = async () =>
+    Object.fromEntries(
+      (
+        await sql`select variant_id, count(*)::int as n,
+            percentile_disc(0.5) within group (order by bin) as mid
+          from evolve.vitals_daily, generate_series(1, count)
+          where experiment_id = ${EXP} and metric = 'lcp' group by variant_id`
+      ).map((x) => [x.variant_id as string, { n: x.n as number, mid: x.mid as number }]),
+    );
+  await expect.poll(async () => (await rows())[CTRL]?.n, { timeout: 15_000 }).toBe(views(CTRL));
+  await expect.poll(async () => (await rows())[SLOW]?.n, { timeout: 15_000 }).toBe(views(SLOW));
+  const got = await rows();
+  // Medians 1.2 s vs 2.9 s land in clearly different LCP bins.
+  expect(got[SLOW]!.mid).toBeGreaterThan(got[CTRL]!.mid);
+  // No conversions asked for, none sent.
+  expect(Object.values(r.arms).every((a) => a.c === 0)).toBe(true);
+});
