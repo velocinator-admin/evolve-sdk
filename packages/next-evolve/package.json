@@ -1,6 +1,6 @@
 {
   "name": "next-evolve",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Self-improving Next.js sites: server-side variants with no flicker, measured in your own Postgres.",
   "license": "MIT",
   "type": "module",
