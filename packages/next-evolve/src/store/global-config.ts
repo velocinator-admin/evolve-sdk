@@ -1,13 +1,17 @@
 // Vercel Global Config store (spec §7.8, formerly Edge Config). The sync route
 // writes the latest signed bundle to one item; every instance reads it (memory
-// TTL 10 s), so a publish reaches all instances in ~10 s instead of ≤ 60 s.
+// TTL 5 s), so a publish reaches all instances in ~5 s instead of ≤ 60 s.
 // Tokens read from Global Config are verified like any other bundle.
 import type { FetchBundleResult } from "./fetch";
 
 type Env = Record<string, string | undefined>;
 
-/** How often instances re-read Global Config. */
-export const GLOBAL_CONFIG_TTL_MS = 10_000;
+/**
+ * How often instances re-read Global Config (on traffic, at most one read per
+ * instance per TTL). 5 s keeps a pause or auto-rollback ≤ ~5 s from every
+ * instance (T19.5); a busy instance makes ≤ 12 reads a minute.
+ */
+export const GLOBAL_CONFIG_TTL_MS = 5_000;
 /** Max wait for the first read on a cold start; then the build bundle serves. */
 export const COLD_READ_CAP_MS = 20;
 

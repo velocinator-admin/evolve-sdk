@@ -39,8 +39,8 @@
 |                             | Vercel                                                                              | Vercel + Global Config                                                  | Node server / Docker (`next start`)                                         |
 | --------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Fresh instance serves       | the build-time bundle                                                               | the bundle in Global Config (waits ≤ 20 ms), then the build-time bundle | the disk cache, then the build-time bundle                                  |
-| Background refresh          | poll the cloud every 60 s (± 10%) on traffic                                        | read Global Config (10 s cache)                                         | every 60 s, plus on traffic                                                 |
-| When an experiment changes  | the instance that gets the webhook updates at once; others within one poll interval | all instances within ~10 s                                              | the instance that gets the webhook at once; others within one poll interval |
+| Background refresh          | poll the cloud every 60 s (± 10%) on traffic                                        | read Global Config (5 s cache)                                          | every 60 s, plus on traffic                                                 |
+| When an experiment changes  | the instance that gets the webhook updates at once; others within one poll interval | all instances within ~5 s                                               | the instance that gets the webhook at once; others within one poll interval |
 | Events while the DB is down | dropped (one retry)                                                                 | dropped (one retry)                                                     | buffered, up to 10,000 rows                                                 |
 
 "Within one poll interval" means up to ~66 s after an instance's last check, on its next request (that request is still served the old bundle; the fetch runs in the background).
@@ -49,7 +49,7 @@ An instance that sees an experiment or variant its bundle doesn't know asks the 
 
 ### Vercel + Global Config (recommended on Vercel)
 
-Without it, the sync webhook reaches one instance and the rest catch up by polling. With a [Global Config](https://vercel.com/docs/edge-config) store, the sync route writes the bundle there and every instance sees it within ~10 s.
+Without it, the sync webhook reaches one instance and the rest catch up by polling. With a [Global Config](https://vercel.com/docs/edge-config) store, the sync route writes the bundle there and every instance sees it within ~5 s (each instance re-reads it at most every 5 s, on traffic). The write also happens when the instance that gets the webhook already had the version.
 
 1. Create a Global Config store and connect it to the project.
 2. Set `EVOLVE_GLOBAL_CONFIG` (the store's connection string), `EVOLVE_GLOBAL_CONFIG_ID` (`ecfg_…`), `EVOLVE_VERCEL_API_TOKEN` (a Vercel access token that can write the store) and, for a team-owned store, `EVOLVE_VERCEL_TEAM_ID`.

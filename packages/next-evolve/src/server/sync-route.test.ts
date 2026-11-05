@@ -43,7 +43,11 @@ function setup(opts: { cloudVer?: number; initialVer?: number } = {}) {
   let t = T0;
   let cloud = token(opts.cloudVer ?? 2);
   const fetcher = vi.fn(
-    async (): Promise<FetchBundleResult> => ({ status: "ok", token: cloud, etag: null }),
+    async (_etag: string | null, _o?: { cloud?: boolean }): Promise<FetchBundleResult> => ({
+      status: "ok",
+      token: cloud,
+      etag: null,
+    }),
   );
   const store = createMemoryStore({
     site: SITE,
@@ -55,6 +59,7 @@ function setup(opts: { cloudVer?: number; initialVer?: number } = {}) {
   });
   const tasks: Array<() => Promise<void>> = [];
   const synced = vi.fn(async (_token: string) => {});
+  const current = vi.fn(async (_token: string) => {});
   const deps: SyncDeps = {
     env,
     store: () => store,
@@ -68,12 +73,14 @@ function setup(opts: { cloudVer?: number; initialVer?: number } = {}) {
       tasks.push(task);
     },
     onSynced: synced,
+    onCurrent: current,
   };
   return {
     store,
     fetcher,
     deps,
     synced,
+    current,
     tasks,
     settle: () => Promise.all(tasks.splice(0).map((f) => f())),
     setCloud: (v: number) => {
@@ -240,5 +247,23 @@ describe("POST /api/evolve/sync", () => {
     await s.settle();
     expect(s.fetcher).toHaveBeenCalledTimes(2);
     expect(s.store.current()?.ver).toBe(4);
+  });
+
+  // T19.5 propagation: with a Global Config write token, the sync route is how
+  // every instance learns about a pause, so it must reach the cloud and write.
+  it("the pull asks the cloud directly (not a Global Config cache that may be behind)", async () => {
+    const s = setup();
+    await handleSync(req(updated(2)), s.deps);
+    await s.settle();
+    expect(s.fetcher).toHaveBeenCalledWith(expect.anything(), { cloud: true });
+  });
+
+  it("a ver this instance already has is still shared (Global Config), without a fetch", async () => {
+    const s = setup({ initialVer: 3 });
+    await handleSync(req(updated(3)), s.deps);
+    await s.settle();
+    expect(s.fetcher).not.toHaveBeenCalled();
+    expect(s.synced).not.toHaveBeenCalled();
+    expect(s.current).toHaveBeenCalledWith(s.store.token());
   });
 });

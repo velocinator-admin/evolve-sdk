@@ -42,6 +42,12 @@ export type SyncDeps = {
   defer?: (task: () => Promise<void>) => void;
   /** Called with the new token once a refresh installed one (persist + revalidate). */
   onSynced?: (token: string) => Promise<void>;
+  /**
+   * Called (after the response) when the webhook names a version this instance
+   * already has, e.g. from a poll: other instances may not, so the handler
+   * still writes it to Global Config.
+   */
+  onCurrent?: (token: string) => Promise<void>;
   replay?: ReplayGuard;
   throttle?: SyncThrottle;
   now?: () => number;
@@ -96,7 +102,16 @@ export async function handleSync(req: Request, deps: SyncDeps): Promise<Response
     !current ||
     r.data.ver > current.ver ||
     (r.data.ver === current.ver && r.data.iat > current.iat);
-  if (!newer) return json(202, { accepted: false, reason: "current" });
+  if (!newer) {
+    const token = store.token();
+    if (token && deps.onCurrent) {
+      const share = deps.onCurrent;
+      (deps.defer ?? deferAfter)(() =>
+        share(token).catch((e) => logRateLimited("sync", "sync share failed", e)),
+      );
+    }
+    return json(202, { accepted: false, reason: "current" });
+  }
 
   const work = () => throttledRefresh(store, deps);
   (deps.defer ?? deferAfter)(work);
@@ -119,7 +134,9 @@ function throttledRefresh(store: BundleStore, deps: SyncDeps): Promise<void> {
     t.waiting = null; // later calls start a new window
     t.last = now();
     const before = store.token();
-    await store.refresh({ force: true });
+    // `cloud`: on a Global Config host the item may be the stale copy this
+    // webhook is about to replace; the cloud has the published bundle.
+    await store.refresh({ force: true, cloud: true });
     const after = store.token();
     if (after && after !== before) await (deps.onSynced ?? revalidateBundle)(after);
   };

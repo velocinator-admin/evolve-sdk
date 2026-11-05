@@ -55,7 +55,7 @@ export type MemoryStoreOptions = {
  * never blocks a request, one fetch in flight, ±10% jitter.
  */
 export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
-  const now = opts.now ?? Date.now;
+  const now = opts.now ?? (() => Date.now());
   const random = opts.random ?? Math.random;
   let current: BundlePayload | null = null;
   let currentToken: string | null = null;

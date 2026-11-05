@@ -40,6 +40,13 @@ export function createEvolveHandler(opts: EvolveHandlerOptions) {
     return parts[parts.length - 1] ?? "";
   };
 
+  /** With a Global Config write token: every instance reads the bundle from there. */
+  async function shareGlobalConfig(token: string): Promise<void> {
+    const gc = globalConfigSettings(cfg.store, env());
+    const site = parseSecretKey(env().EVOLVE_SECRET_KEY ?? "")?.siteId;
+    if (gc && site) await writeGlobalConfig(gc, site, token);
+  }
+
   async function post(req: Request): Promise<Response> {
     try {
       switch (action(req)) {
@@ -71,11 +78,10 @@ export function createEvolveHandler(opts: EvolveHandlerOptions) {
             env: env(),
             store: () => getBundleStore(cfg, { env: env() }),
             onSynced: async (token) => {
-              const gc = globalConfigSettings(cfg.store, env());
-              const site = parseSecretKey(env().EVOLVE_SECRET_KEY ?? "")?.siteId;
-              if (gc && site) await writeGlobalConfig(gc, site, token);
+              await shareGlobalConfig(token);
               await revalidateBundle();
             },
+            onCurrent: shareGlobalConfig,
           });
         case "aggregate":
           return await handleAggregate(req, {

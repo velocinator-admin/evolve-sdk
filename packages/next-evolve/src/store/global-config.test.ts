@@ -11,6 +11,7 @@ import { evolveReady } from "../proxy/proxy";
 import {
   COLD_READ_CAP_MS,
   createGlobalConfigFetcher,
+  GLOBAL_CONFIG_TTL_MS,
   globalConfigItemKey,
   globalConfigSettings,
   writeGlobalConfig,
@@ -228,5 +229,24 @@ describe("Global Config fetcher, stale item (T19.5)", () => {
     t += 10_000;
     expect(await f(null)).toEqual({ status: "ok", token: fresh, etag: null });
     expect(cloudFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Global Config TTL (T19.5 propagation)", () => {
+  it("instances re-read every 5 s, so a pause written by the sync route is live in ≤ ~5 s", async () => {
+    expect(GLOBAL_CONFIG_TTL_MS).toBe(5_000);
+    const { token } = publish();
+    const read = vi.fn(async () => token);
+    const store = getBundleStore(
+      { pollSeconds: 60 },
+      { env: env({ EVOLVE_CLOUD_URL: "http://127.0.0.1:1" }), globalConfigReader: read },
+    )!;
+    await store.refresh();
+    expect(read).toHaveBeenCalledTimes(1);
+    const t0 = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(t0 + GLOBAL_CONFIG_TTL_MS * 1.1);
+    store.peek();
+    expect(read).toHaveBeenCalledTimes(2);
+    vi.mocked(Date.now).mockRestore();
   });
 });
