@@ -2,16 +2,16 @@
 
 On `https://4dfit.app` the Evolve proxy measured +19 ms p50 / +13 ms p95 TTFB (`/` through the proxy vs `/privacy` without it, both CDN HITs; T12.4), against an in-proxy `Server-Timing` of 0.12 ms and a 5 ms budget. This note finds where that time goes and what can be done about it.
 
-**Status (2026-11-02):**
+**Status (2026-11-02, updated 2026-11-05):**
 
 | | where |
 |---|---|
 | `registerEvolve` no longer awaits the manifest push | **shipped in `next-evolve` 0.5.1** |
 | `next-evolve/config` loads under `require()` (`default` export condition), so `next.config.ts` can import it | **shipped in `next-evolve` 0.5.1** (the build's `check-dist` requires it) |
 | Budget restated for Vercel (≈ +20 ms on a first view, ≈ 0 on CDN-routed repeat views; 5 ms still applies to in-proxy time and `next start`) | evolve-cloud `docs/roadmap/phase-1-technical-spec.md` §6.6, and [phase-1.md](phase-1.md) |
-| Opt-in `cdnRouting` (repeat views skip the proxy) | **not shipped.** Prototype on branch `perf/proxy-overhead`. Before it ships: forged-cookie rate limit on the fresh refetch, `init`/`doctor` support, a fixture e2e, README docs, a Vercel re-measure (cloud backlog T19.5a) |
+| Opt-in `cdnRouting` (repeat views skip the proxy) | **shipped in `next-evolve` 0.6.0** (2026-11-05, T19.5a): forged-cookie protection, `init --cdn-routing`, `doctor`, fixture e2e, docs; re-measured on Vercel below |
 
-**Short version:** the cost is Vercel invoking a proxy function at all. A no-op `proxy.ts` that only returns `NextResponse.next()` costs the same +18 ms as Evolve; Evolve's own code adds ~1 ms on top. Edge-runtime middleware costs the same. Nothing on the warm request path makes a network call. The only way under the budget is not to invoke the proxy: the prototype `cdnRouting` serves repeat views from the CDN with **+0 ms** (measured), and first views keep the ~+18 ms platform cost.
+**Short version:** the cost is Vercel invoking a proxy function at all. A no-op `proxy.ts` that only returns `NextResponse.next()` costs the same +18 ms as Evolve; Evolve's own code adds ~1 ms on top. Edge-runtime middleware costs the same. Nothing on the warm request path makes a network call. The only way under the budget is not to invoke the proxy: `cdnRouting` (opt-in since 0.6.0) serves repeat views from the CDN with **+0 ms** (measured with the released code), and first views keep the ~+18–20 ms platform cost.
 
 ## Method
 
@@ -62,6 +62,19 @@ A better network day (~50 ms base). The bundle is valid: new visitors get `evolv
 
 Evolve is indistinguishable from a no-op proxy (±2 ms; in-proxy 0.1–0.3 ms). The `cdnRouting` repeat view matches the no-proxy page, and its responses carry no `Server-Timing` or `Set-Cookie`: the proxy didn't run.
 
+### Re-measure with the released code: `next-evolve` 0.6.0 (2026-11-05)
+
+Throwaway project `evolve-perf-bench-060` (team Velocinator, Hobby, Next 16.2.10, npm `next-evolve@0.6.0` with `cdnRouting: true`, default `maxAgeSeconds` = 60; `evolve.config`, `evolveRewrites()` in `next.config.ts` and the `evolveMatcher()` literal in `proxy.ts`; a fake-cloud-signed bundle with all traffic on B, `EVOLVE_CLOUD_URL` pointing nowhere, so no production cloud was touched), deleted after the run. Same sampler, 250 rounds × 4 targets, 150 ms gap, from Nashville. Every sample a CDN `HIT`, none dropped.
+
+| variant | p50 | p95 | added p50 | added p95 | in-proxy p50 |
+|---|---|---|---|---|---|
+| (a) no proxy (`/plain`) | 46.1 | 70.6 | — | — | — |
+| first view (proxy, new visitor) | 65.6 | 111.7 | **+19.4** | +41.2 | 0.32 |
+| returning visitor, route cookie expired (proxy) | 64.7 | 102.4 | +18.6 | +31.8 | 0.19 |
+| **repeat view (`cdnRouting`, proxy not invoked)** | **45.4** | **80.9** | **−0.8** | +10.3 | not invoked |
+
+Checked on the deployment: the first view sets `evolve_r_1kbj9e7=ev_k3j9x2-c1d2e3; Max-Age=60` with `evolve_id`/`evolve_a`; the repeat view has no `Server-Timing` and no `Set-Cookie` (`x-matched-path: /[evolve]/evolve`, `HIT`); a forged well-formed code is served without the proxy (control); a malformed cookie runs the proxy, which re-issues the cookie; `/ev_*` directly is still a 404. This matches the prototype's run 2 (repeat −1.1 ms, first view +16.9 ms).
+
 ### Europe and Asia (Globalping, 7 probes: fra1 ×3, arn1, sin1, hnd1 ×2 POPs; 2 rounds)
 
 Single-shot requests are noisy, and the first round hit cold proxy instances: 0.3–1.4 s for every proxied target, versus 0.2–0.6 s for the plain page (also cold caches). Median `firstByte` of the warm second round:
@@ -106,9 +119,9 @@ No `after()`, no logging on the happy path (`logRateLimited` only on errors), no
 
 The 13–19 ms is the platform cost of invoking any proxy function on Vercel (routing the request into a Lambda in the nearest of 8 regions and back before the cache lookup), not Evolve's code (0.1–0.5 ms in-proxy, ~1–2 ms end to end over a no-op proxy) and not a network call. It can't be tuned away inside the proxy, and Edge runtime, Bun or a smaller bundle don't remove the invocation. A tighter matcher already applies (4dfit's matcher is `/` and `/(ev_.*)`); what helps is a matcher that skips requests that don't need the proxy.
 
-## Fix prototyped on `perf/proxy-overhead` (not shipped)
+## `cdnRouting` (prototyped on `perf/proxy-overhead`, shipped in 0.6.0)
 
-Everything in this section except the `default` export condition and the `registerEvolve` fix lives only on branch `perf/proxy-overhead`; none of it is in a release.
+This section describes the prototype; 0.6.0 ships it with the follow-ups listed at the end (now done). User docs: `packages/next-evolve/docs/configuration.md#cdn-routing-cdnrouting`.
 
 **`cdnRouting` (opt-in, static-mode routes).** After the proxy routes a visitor, it also sets `evolve_r_<hash(route)>` = the variant code (HttpOnly, SameSite=Lax, Max-Age = `cdnRouting.maxAgeSeconds`, default the poll interval, 60 s in production). Two pieces of config keyed on that cookie:
 
@@ -148,13 +161,13 @@ Properties:
 
 **Also on the branch, shipped in 0.5.1:** `registerEvolve` no longer awaits the manifest push (removes up to 3 s from cold starts of page functions and `next start`).
 
-**Not done (follow-ups before it ships; cloud backlog T19.5a):** `init --cdn-routing` writing the matcher and `next.config` rewrites; `doctor` checking that the literal matcher equals `evolveMatcher()` and that `next.config` contains `evolveRewrites()` (doctor already tolerates object matchers: it reads the string literals); fresh-refetch rate limit for forged codes; an e2e in the fixture; README docs; a Vercel re-measure with the shipped code.
+**Follow-ups, done in 0.6.0 (T19.5a):** `init --cdn-routing` writes `cdnRouting`, the matcher literal and the `next.config` rewrites; `doctor` checks the literal equals `evolveMatcher()` and `next.config` calls `evolveRewrites()`; the render-side fresh refetch is limited to 1 per 5 s per instance (forged codes render control, uncounted); the matcher's `missing` carries the code pattern, so a malformed cookie runs the proxy instead of 404ing; fixture e2e `apps/fixture/e2e/cdn.spec.ts`; README/docs; the Vercel re-measure above. Each distinct forged code still costs one ISR render (like any unknown `[slug]`), affecting only the forger.
 
 ## Recommendation
 
 1. **Restate the budget for Vercel** (done: spec §6.6, phase-1.md): "≤ 5 ms added TTFB" isn't reachable on Vercel for any request that runs a proxy; a no-op proxy measures ~+18 ms. Keep 5 ms for in-proxy time (0.1–0.5 ms, met) and for self-hosted `next start` (0.45–0.59 ms, met, phase-1.md). For Vercel, state "+≤ 20 ms on a first view, +0 on CDN-routed repeat views".
 2. **Ship the `registerEvolve` fix** (done, 0.5.1) regardless (no behaviour change except that cold starts stop waiting on the cloud).
-3. **Ship `cdnRouting` as opt-in** (open, T19.5a) after the forged-code rate limit and `init`/`doctor` support; default `maxAgeSeconds` = poll interval. Don't turn it on by default until the staleness trade-off is in the docs.
+3. **Ship `cdnRouting` as opt-in** (done, 0.6.0, T19.5a); default `maxAgeSeconds` = poll interval; the staleness trade-off is in the docs. It stays off by default.
 4. Don't pursue Edge runtime, Bun or bundle-size work for this: none of them remove the invocation (measured for Edge).
 
 ## Reproduce
