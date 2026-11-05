@@ -1,5 +1,6 @@
 import { CONTROL_CODE, encodeCode, newAnonId, verifyPreview } from "@next-evolve/protocol";
 import { type NextFetchEvent, type NextRequest, NextResponse } from "next/server";
+import { cdnCookieName } from "../config/cdn";
 import { type EvolveConfig, normalizePath, resolveConfig } from "../config/config";
 import { assign, visitorDraw } from "../core/assign";
 import { createBotDetector } from "../core/bots";
@@ -54,6 +55,7 @@ export function applyEvolve(
   const isStatic = route.mode === "static";
 
   let res: NextResponse;
+  let routed = false;
   try {
     let isBot = detectors.get(config);
     if (!isBot) {
@@ -64,7 +66,7 @@ export function applyEvolve(
       getBundleStore(cfg, opts)?.peek(event ? (p) => event.waitUntil(p) : undefined) ?? null;
 
     let code = CONTROL_CODE;
-    const setCookies: [name: string, value: string, session?: boolean][] = [];
+    const setCookies: [name: string, value: string, session?: boolean, maxAge?: number][] = [];
 
     // Preview links: a signed token forces a code; nothing is assigned or counted.
     const fromQuery = req.nextUrl.searchParams.get(PREVIEW_PARAM);
@@ -85,19 +87,24 @@ export function applyEvolve(
         (e) => bundle.routing.experiments[e]?.status === "running",
       );
       if (running) {
+        routed = true;
         if (!known) setCookies.push([ANON_COOKIE, anon]);
         if (a.changed) setCookies.push([ASSIGN_COOKIE, serializeAssignments(a.assigned)]);
       }
     }
+    // CDN fast path: later views of this route (until the cookie expires) are
+    // rewritten by next.config from the cookie, without invoking the proxy.
+    if (routed && isStatic && cfg.cdnRouting)
+      setCookies.push([cdnCookieName(path), code, false, cfg.cdnRouting.maxAgeSeconds]);
     res = isStatic ? rewrite(req, code, path) : passThrough(req, code, path);
     if (setCookies.length) {
       const secure =
         (req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", "")) === "https";
       const maxAge = cfg.cookies.maxAgeDays * 86_400;
-      for (const [name, value, session] of setCookies) {
+      for (const [name, value, session, age] of setCookies) {
         res.cookies.set(name, value, {
           path: "/",
-          ...(session ? {} : { maxAge }),
+          ...(session ? {} : { maxAge: age ?? maxAge }),
           sameSite: "lax",
           httpOnly: true,
           secure,

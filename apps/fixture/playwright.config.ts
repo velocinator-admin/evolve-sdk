@@ -3,8 +3,11 @@ import {
   APP_PORT,
   APP_URL,
   appEnv,
+  CDN_APP_PORT,
+  CDN_APP_URL,
   CLOUD_PORT,
   CLOUD_URL,
+  cdnAppEnv,
   EDGE_APP_PORT,
   EDGE_APP_URL,
   edgeAppEnv,
@@ -76,6 +79,7 @@ export default defineConfig({
         ["edge", EDGE_APP_PORT, EDGE_APP_URL, edgeAppEnv],
         ["offline", OFFLINE_APP_PORT, OFFLINE_APP_URL, offlineAppEnv],
         ["prodkey", PRODKEY_APP_PORT, PRODKEY_APP_URL, prodkeyAppEnv],
+        ["cdn", CDN_APP_PORT, CDN_APP_URL, cdnAppEnv],
       ] as const
     ).map(([dir, port, url, env]) => ({
       command: `rm -rf .evolve-cache/${dir} && mkdir -p .evolve-cache/${dir} && pnpm exec next start --port ${port}`,

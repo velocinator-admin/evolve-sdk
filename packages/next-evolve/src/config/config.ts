@@ -14,6 +14,13 @@ export type EvolveConfig = {
   /** Return false to serve control and set no cookies (e.g. before consent). */
   consent?: (req: Request) => boolean;
   bots?: { extraPatterns?: string[] };
+  /**
+   * Opt-in CDN fast path for static-mode routes: repeat views skip the proxy
+   * (no function invocation). `maxAgeSeconds` (default: the poll interval)
+   * bounds how long a pause or rollback can lag for a returning visitor.
+   * Needs `evolveRewrites()` in next.config and `evolveMatcher()` in proxy.ts.
+   */
+  cdnRouting?: boolean | { maxAgeSeconds?: number };
   debug?: boolean;
 };
 
@@ -26,6 +33,7 @@ export type ResolvedConfig = {
   cookies: { maxAgeDays: number; domain: string | undefined };
   consent: ((req: Request) => boolean) | undefined;
   botPatterns: readonly string[];
+  cdnRouting: { maxAgeSeconds: number } | null;
   debug: boolean;
 };
 
@@ -60,10 +68,22 @@ export function resolveConfig(config: EvolveConfig): ResolvedConfig {
     routes.set(path, route);
   }
   const dev = process.env.NODE_ENV !== "production";
+  const pollSeconds = config.sync?.pollSeconds ?? (dev ? 5 : 60);
+  let cdnRouting: ResolvedConfig["cdnRouting"] = null;
+  if (config.cdnRouting) {
+    const maxAge =
+      typeof config.cdnRouting === "object"
+        ? (config.cdnRouting.maxAgeSeconds ?? pollSeconds)
+        : pollSeconds;
+    if (!Number.isInteger(maxAge) || maxAge < 1 || maxAge > 86_400) {
+      throw new Error("[evolve] cdnRouting.maxAgeSeconds must be an integer from 1 to 86400");
+    }
+    cdnRouting = { maxAgeSeconds: maxAge };
+  }
   const r: ResolvedConfig = {
     routes,
     store: config.store ?? "auto",
-    pollSeconds: config.sync?.pollSeconds ?? (dev ? 5 : 60),
+    pollSeconds,
     databaseUrlEnv: config.database?.urlEnv ?? "EVOLVE_DATABASE_URL",
     aggregate: {
       maxMs: config.aggregate?.maxMs ?? 25_000,
@@ -72,6 +92,7 @@ export function resolveConfig(config: EvolveConfig): ResolvedConfig {
     cookies: { maxAgeDays: config.cookies?.maxAgeDays ?? 365, domain: config.cookies?.domain },
     consent: config.consent,
     botPatterns: config.bots?.extraPatterns ?? [],
+    cdnRouting,
     debug: config.debug ?? dev,
   };
   resolved.set(config, r);

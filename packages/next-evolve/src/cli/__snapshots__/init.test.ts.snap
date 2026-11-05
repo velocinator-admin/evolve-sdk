@@ -1,5 +1,58 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`init --cdn-routing (T19.5a) > turns cdnRouting on, writes the evolveMatcher() literal and the next.config rewrites; a re-run writes nothing 1`] = `
+{
+  "evolve.config.ts": "import { defineConfig } from "next-evolve/config";
+
+export default defineConfig({
+  // Pages Evolve may test. "static": cached per variant (moved under app/[evolve]/).
+  // "dynamic": rendered per request, the page stays where it is.
+  routes: {
+    "/": { mode: "static" },
+    "/pricing": { mode: "static" },
+  },
+  // Repeat views skip the proxy (served from the CDN by next.config's rewrites);
+  // a pause or rollback reaches a returning visitor within one poll interval.
+  cdnRouting: true,
+});
+",
+  "next.config.ts": "import type { NextConfig } from "next";
+import { evolveRewrites } from "next-evolve/config";
+import evolveConfig from "./evolve.config";
+
+const nextConfig: NextConfig = {
+  // Evolve cdnRouting: a returning visitor's variant is served from the CDN.
+  async rewrites() {
+    return { beforeFiles: evolveRewrites(evolveConfig), afterFiles: [], fallback: [] };
+  },
+  /* config options here */
+};
+
+export default nextConfig;
+",
+  "proxy.ts": "import { createEvolveProxy } from "next-evolve/proxy";
+import buildBundle from "./.evolve/bundle.generated";
+import evolveConfig from "./evolve.config";
+
+export const proxy = createEvolveProxy(evolveConfig, { buildBundle });
+
+// cdnRouting: evolveMatcher(evolveConfig), written out (Next needs a literal;
+// \`npx next-evolve doctor\` checks it still matches evolve.config).
+export const config = {
+  matcher: [
+    { source: "/", missing: [{ type: "cookie", key: "evolve_r_bo0mse", value: "ev_(?:0|[a-z0-9]{6}[-~][a-z0-9]{6}(?:\\\\.[a-z0-9]{6}[-~][a-z0-9]{6}){0,2})" }] },
+    { source: "/", has: [{ type: "cookie", key: "evolve_pv" }] },
+    { source: "/", has: [{ type: "query", key: "evolve_preview" }] },
+    { source: "/pricing", missing: [{ type: "cookie", key: "evolve_r_gjovo8", value: "ev_(?:0|[a-z0-9]{6}[-~][a-z0-9]{6}(?:\\\\.[a-z0-9]{6}[-~][a-z0-9]{6}){0,2})" }] },
+    { source: "/pricing", has: [{ type: "cookie", key: "evolve_pv" }] },
+    { source: "/pricing", has: [{ type: "query", key: "evolve_preview" }] },
+    "/(ev_.*)",
+  ],
+};
+",
+}
+`;
+
 exports[`init: idempotent, --dry-run, --yes (T11.5) > --dry-run prints the diff and changes nothing: no files, install, migration or cloud writes 1`] = `
 "Would change:
 

@@ -3,7 +3,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parseSecretKey, verifyBundle } from "@next-evolve/protocol";
-import { type EvolveConfig, normalizePath } from "../config/config";
+import { evolveMatcher } from "../config/cdn";
+import { type EvolveConfig, normalizePath, resolveConfig } from "../config/config";
 import { trustedKeys } from "../core/keys";
 import { createSql } from "../db/client";
 import { loadMigrations } from "../db/migrate";
@@ -12,6 +13,7 @@ import { cloudUrl, getSiteInfo, runCloudTest } from "./cloud";
 import { detectProject } from "./detect";
 import { fileEnv } from "./env-file";
 import { type AppModules, loadAppModules, reexecWithTypes } from "./load-app";
+import { evalMatcher, formatMatcher, matcherSource } from "./matcher";
 import { BUILD_BUNDLE_PATH, readBuildBundle } from "./pull";
 
 type Env = Record<string, string | undefined>;
@@ -57,9 +59,9 @@ function matcherRegex(m: string): RegExp | null {
 
 /** The string literals in `config.matcher`, or null when there's no matcher (= every path). */
 export function readMatcher(src: string): string[] | null {
-  const m = /matcher\s*:\s*(\[[\s\S]*?\]|"[^"]*"|'[^']*'|`[^`]*`)/.exec(src);
-  if (!m) return null;
-  return [...m[1]!.matchAll(/(["'`])((?:\\.|(?!\1).)*)\1/g)].map((x) => x[2]!);
+  const text = matcherSource(src);
+  if (!text) return null;
+  return [...text.matchAll(/(["'`])((?:\\.|(?!\1).)*)\1/g)].map((x) => x[2]!);
 }
 
 export const covers = (matchers: string[] | null, path: string) =>
@@ -217,6 +219,48 @@ export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
     }
   }
 
+  // cdnRouting (T19.5a): the proxy.ts literal must be evolveMatcher(config),
+  // and next.config must serve the cookie (evolveRewrites). A matcher that
+  // skips the proxy without the rewrite sends returning visitors to a 404.
+  const proxySrc = d.proxyFile ? (read(join(cwd, d.proxyFile)) ?? "") : "";
+  let cdnOn = false;
+  try {
+    cdnOn = Boolean(config && resolveConfig(config).cdnRouting);
+  } catch {}
+  const cookieMatcher = proxySrc.includes("evolve_r_");
+  if (config && d.proxyFile && (cdnOn || cookieMatcher)) {
+    const want = evolveMatcher(config);
+    const text = matcherSource(proxySrc);
+    const have = text ? evalMatcher(text) : null;
+    const nextSrc = d.nextConfigFile ? (read(join(cwd, d.nextConfigFile)) ?? "") : "";
+    const literal = `\n    ${formatMatcher(want, "    ")}`;
+    if (!cdnOn)
+      checks.push(
+        fail(
+          "CDN routing",
+          `cdnRouting is off in evolve.config, but config.matcher in ${d.proxyFile} skips the proxy on the route cookie; set it back to ${formatMatcher(want)}`,
+        ),
+      );
+    else if (JSON.stringify(have) !== JSON.stringify(want))
+      checks.push(
+        fail(
+          "CDN routing",
+          `config.matcher in ${d.proxyFile} doesn't match evolveMatcher(evolveConfig); set it to:${literal}`,
+        ),
+      );
+    else if (!/\bevolveRewrites\s*\(/.test(nextSrc))
+      checks.push(
+        fail(
+          "CDN routing",
+          `${d.nextConfigFile ?? "next.config"} doesn't call evolveRewrites(evolveConfig): returning visitors would skip the proxy and get a 404. Run npx next-evolve init --cdn-routing, or see the README`,
+        ),
+      );
+    else {
+      const maxAge = resolveConfig(config).cdnRouting!.maxAgeSeconds;
+      checks.push(ok("CDN routing", `repeat views skip the proxy for ${maxAge} s`));
+    }
+  }
+
   // Pages: static routes wrapped under [evolve]; no conflicting top-level segment.
   const app = d.appDir ?? "app";
   if (!config) checks.push(fail("Pages", configError ?? "couldn't load evolve.config"));
@@ -283,7 +327,9 @@ export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
       ? ok("CDN", "Vercel")
       : warn(
           "CDN",
-          "not on Vercel: if a CDN caches pages, it must not cache Evolve routes by URL alone (the variant comes from the evolve cookie)",
+          cdnOn
+            ? "not on Vercel, with cdnRouting on: returning visitors are served without the proxy's no-store header, so a shared CDN in front of the app must not cache Evolve routes by URL alone (or turn cdnRouting off)"
+            : "not on Vercel: if a CDN caches pages, it must not cache Evolve routes by URL alone (the variant comes from the evolve cookie)",
         ),
   );
   return checks;

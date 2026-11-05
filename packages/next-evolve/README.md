@@ -55,6 +55,8 @@ It installs `next-evolve` and `zod`, checks the key, migrates the database and w
 
 If you already have a `proxy.ts`/`middleware.ts`, or `init` can't edit your layout, it prints the lines to add.
 
+**On Vercel, add `--cdn-routing`** (opt-in, static mode) to serve repeat views from the CDN without running the proxy: any proxy costs ~20 ms TTFB on Vercel, and this removes it for returning visitors within `cdnRouting.maxAgeSeconds` (default: the poll interval, 60 s). The trade-off is that a pause or rollback can take up to that long to reach a returning visitor. See [docs/configuration.md](docs/configuration.md#cdn-routing-cdnrouting).
+
 ### 4. Make a component optimizable
 
 Declare which props Evolve may change with a Zod schema, next to the component:

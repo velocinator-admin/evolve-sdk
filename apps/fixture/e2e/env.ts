@@ -169,3 +169,20 @@ export const prodkeyAppEnv = {
   EVOLVE_SECRET_KEY: `evk_live_${PRODKEY_SITE}_${"P".repeat(32)}`,
   EVOLVE_CACHE_DIR: ".evolve-cache/prodkey",
 };
+
+/**
+ * T19.5a: cdnRouting on (route cookies live CDN_MAX_AGE s). It polls every
+ * 10 min, so a pause reaches it through the sync webhook and the bundle
+ * fetches it makes are easy to count.
+ */
+export const CDN_APP_PORT = 3107;
+export const CDN_APP_URL = `http://localhost:${CDN_APP_PORT}`;
+export const CDN_SITE = "site_fakecdnr01";
+export const CDN_MAX_AGE = 4;
+export const cdnAppEnv = {
+  ...appEnv,
+  EVOLVE_SECRET_KEY: `evk_live_${CDN_SITE}_${"C".repeat(32)}`,
+  EVOLVE_POLL_SECONDS: "600",
+  EVOLVE_CDN_ROUTING: String(CDN_MAX_AGE),
+  EVOLVE_CACHE_DIR: ".evolve-cache/cdn",
+};

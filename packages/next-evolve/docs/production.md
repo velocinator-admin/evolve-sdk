@@ -62,6 +62,10 @@ Bundles read from the store are verified like any other. Without the token the s
 
 On Vercel the cache keys on the rewritten path, so each variant is cached separately. Elsewhere, the proxy sets `Cache-Control: private, no-store` on tested routes. If a CDN in front of your app ignores that and caches by URL, every visitor gets whichever variant was cached first. Don't cache tested routes at the CDN, or include the `evolve_a` cookie in the cache key.
 
+### Faster repeat views on Vercel (`cdnRouting`)
+
+Any proxy on Vercel adds ~20 ms TTFB to the requests it runs on. With `cdnRouting` (opt-in, since 0.6) a returning visitor's views within `maxAgeSeconds` (default 60 s) skip the proxy and are served from the CDN at the no-proxy TTFB. The cost: a pause or auto-rollback can take up to `maxAgeSeconds` to reach a visitor who has the route cookie. Set it up with `npx next-evolve init --cdn-routing`; details and the trade-off in [configuration.md](configuration.md#cdn-routing-cdnrouting). It pays off for visitors who come back to a tested page within the window (navigating back to `/`, reloads); a funnel where most traffic is first views barely changes.
+
 ### Serverless functions
 
 The `/api/evolve/[...evolve]` route exports `maxDuration = 60`. Aggregation stops at 25 s by default (`aggregate.maxMs`) and returns a partial result the cloud follows up on.

@@ -11,7 +11,10 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { freshApp, LAYOUT } from "../../test/apps";
 import { project } from "../../test/project";
+import { evolveMatcher } from "../config/cdn";
+import { defineConfig } from "../config/config";
 import { type InitDeps, initCommand } from "./init";
+import { evalMatcher, matcherSource } from "./matcher";
 
 let cloud: FakeCloud;
 beforeAll(async () => {
@@ -275,5 +278,98 @@ describe("init: idempotent, --dry-run, --yes (T11.5)", () => {
     const asked = await run(app(), [...keys, "--routes", "/"], { ask });
     expect(asked.code, asked.text).toBe(0);
     expect(ask).toHaveBeenCalledWith(expect.stringMatching(/Use DATABASE_URL/));
+  });
+});
+
+describe("init --cdn-routing (T19.5a)", () => {
+  const args = [...keys, "--yes", "--routes", "/ /pricing", "--cdn-routing"];
+  const CNA_NEXT_CONFIG = `import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+`;
+  const app = (extra: Record<string, string> = {}) =>
+    freshApp({
+      "app/pricing/page.tsx": "export default function Pricing() {\n  return null;\n}\n",
+      ...extra,
+    });
+  const expected = evolveMatcher(
+    defineConfig({
+      routes: { "/": { mode: "static" }, "/pricing": { mode: "static" } },
+      cdnRouting: true,
+    }),
+  );
+
+  it("turns cdnRouting on, writes the evolveMatcher() literal and the next.config rewrites; a re-run writes nothing", async () => {
+    cloud.publish({ site: TEST_SITE, routing: { routes: {}, experiments: {} }, variants: {} });
+    const dir = app({ "next.config.ts": CNA_NEXT_CONFIG });
+    const r = await run(dir, args);
+    expect(r.code, r.text).toBe(0);
+    expect(read(dir, "evolve.config.ts")).toMatch(/\n {2}cdnRouting: true,\n/);
+    const proxy = read(dir, "proxy.ts");
+    expect(evalMatcher(matcherSource(proxy)!)).toEqual(expected);
+    const next = read(dir, "next.config.ts");
+    expect(next).toContain('import { evolveRewrites } from "next-evolve/config";');
+    expect(next).toContain('import evolveConfig from "./evolve.config";');
+    expect(next).toContain(
+      "return { beforeFiles: evolveRewrites(evolveConfig), afterFiles: [], fallback: [] };",
+    );
+    expect(next).toContain("/* config options here */"); // the rest is kept
+    expect({
+      "evolve.config.ts": read(dir, "evolve.config.ts"),
+      "proxy.ts": proxy,
+      "next.config.ts": next,
+    }).toMatchSnapshot();
+
+    const before = mtimes(dir);
+    const again = await run(dir, args);
+    expect(again.code, again.text).toBe(0);
+    expect(again.text).toContain("files already set up");
+    expect(mtimes(dir)).toEqual(before);
+  });
+
+  it("creates next.config.ts when there is none", async () => {
+    const dir = app();
+    const r = await run(dir, args);
+    expect(r.code, r.text).toBe(0);
+    const next = read(dir, "next.config.ts");
+    expect(next).toContain("evolveRewrites(evolveConfig)");
+    expect(next).toContain("export default nextConfig;");
+  });
+
+  it("upgrades an app init set up earlier: config flag, matcher replaced, next.config edited", async () => {
+    const dir = app({ "next.config.ts": CNA_NEXT_CONFIG });
+    expect((await run(dir, [...keys, "--yes", "--routes", "/ /pricing"])).code).toBe(0);
+    expect(read(dir, "proxy.ts")).toContain('matcher: ["/", "/pricing", "/(ev_.*)"]');
+    const r = await run(dir, args);
+    expect(r.code, r.text).toBe(0);
+    expect(read(dir, "evolve.config.ts")).toContain("cdnRouting: true");
+    expect(evalMatcher(matcherSource(read(dir, "proxy.ts"))!)).toEqual(expected);
+    expect(read(dir, "next.config.ts")).toContain("evolveRewrites(evolveConfig)");
+  });
+
+  it("an existing rewrites() or an own proxy gets instructions instead of an edit", async () => {
+    const own = `export default {\n  async rewrites() {\n    return [{ source: "/a", destination: "/b" }];\n  },\n};\n`;
+    const dir = app({
+      "next.config.ts": own,
+      "proxy.ts":
+        'import { NextResponse } from "next/server";\nexport function proxy() {\n  return NextResponse.next();\n}\nexport const config = { matcher: ["/app"] };\n',
+    });
+    const r = await run(dir, args);
+    expect(r.code, r.text).toBe(0);
+    expect(read(dir, "next.config.ts")).toBe(own);
+    expect(r.text).toMatch(/next\.config\.ts already has rewrites/);
+    expect(r.text).toContain("beforeFiles: evolveRewrites(evolveConfig)");
+    expect(r.text).toMatch(/Your proxy\.ts exists/);
+    expect(r.text).toContain('{ source: "/", missing: [{ type: "cookie", key: "evolve_r_');
+  });
+
+  it("needs static routes", async () => {
+    const r = await run(app(), [...args, "--mode", "dynamic"]);
+    expect(r.code).toBe(1);
+    expect(r.text).toMatch(/--cdn-routing needs static routes/);
   });
 });

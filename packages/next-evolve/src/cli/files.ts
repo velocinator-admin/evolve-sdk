@@ -2,7 +2,10 @@
 // function is idempotent: when its change is already there it plans nothing.
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
+import { evolveMatcher, type MatcherEntry } from "../config/cdn";
+import { defineConfig } from "../config/config";
 import type { Detection } from "./detect";
+import { evalMatcher, formatMatcher, matcherSource } from "./matcher";
 import type { Plan } from "./plan";
 
 export type RouteMode = { path: string; mode: "static" | "dynamic" };
@@ -20,9 +23,24 @@ export const configFile = (d: Detection) => `evolve.config.${ext(d)}`;
 export const goalsFile = (d: Detection) => `evolve.goals.${ext(d)}`;
 export const routeFile = (d: Detection) => `${d.appDir}/api/evolve/[...evolve]/route.${ext(d)}`;
 export const matcherFor = (routes: RouteMode[]) => [...routes.map((r) => r.path), "/(ev_.*)"];
-const list = (xs: string[]) => `[${xs.map((x) => JSON.stringify(x)).join(", ")}]`;
 
-export function planConfig(plan: Plan, d: Detection, routes: RouteMode[]): void {
+/** `evolveMatcher()` for these routes, as `init` writes it into proxy.ts. */
+export function matcherEntries(routes: RouteMode[], cdn: boolean): MatcherEntry[] {
+  if (!cdn) return matcherFor(routes);
+  return evolveMatcher(
+    defineConfig({
+      routes: Object.fromEntries(routes.map((r) => [r.path, { mode: r.mode }])),
+      cdnRouting: true,
+    }),
+  );
+}
+
+const CDN_LINES = `  // Repeat views skip the proxy (served from the CDN by next.config's rewrites);
+  // a pause or rollback reaches a returning visitor within one poll interval.
+  cdnRouting: true,
+`;
+
+export function planConfig(plan: Plan, d: Detection, routes: RouteMode[], cdn = false): void {
   const routeLines = routes.map((r) => `    ${JSON.stringify(r.path)}: { mode: "${r.mode}" },`);
   const created = plan.create(
     configFile(d),
@@ -34,9 +52,17 @@ export default defineConfig({
   routes: {
 ${routeLines.join("\n")}
   },
-});
+${cdn ? CDN_LINES : ""}});
 `,
   );
+  if (!created && cdn) {
+    const current = plan.read(configFile(d)) ?? "";
+    if (!/\bcdnRouting\s*:/.test(current)) {
+      const end = /\n\}\);\s*$/.exec(current);
+      if (end) plan.write(configFile(d), `${current.slice(0, end.index)}\n${CDN_LINES}});\n`);
+      else plan.manual.push(`Add cdnRouting: true to defineConfig({ … }) in ${configFile(d)}`);
+    }
+  }
   if (!created) {
     const current = plan.read(configFile(d)) ?? "";
     const missing = routes.filter((r) => !current.includes(JSON.stringify(r.path)));
@@ -77,11 +103,15 @@ export const maxDuration = 60;
   );
 }
 
-export function planProxy(plan: Plan, d: Detection, routes: RouteMode[]): void {
-  const matcher = list(matcherFor(routes));
+export function planProxy(plan: Plan, d: Detection, routes: RouteMode[], cdn = false): void {
+  const entries = matcherEntries(routes, cdn);
+  const matcher = formatMatcher(entries, "  ");
   if (d.proxyFile) {
     const current = plan.read(d.proxyFile) ?? "";
-    if (current.includes("next-evolve")) return;
+    if (current.includes("next-evolve")) {
+      if (cdn) upgradeMatcher(plan, d.proxyFile, current, routes, entries);
+      return;
+    }
     plan.manual.push(
       `Your ${d.proxyFile} exists, so add Evolve to it:
     import { applyEvolve } from "next-evolve/proxy";
@@ -90,7 +120,7 @@ export function planProxy(plan: Plan, d: Detection, routes: RouteMode[]): void {
     // first thing in your ${d.proxyKind} function:
     const evolved = applyEvolve(evolveConfig, req, event, { buildBundle });
     if (evolved) return evolved;
-  and add ${matcher.slice(1, -1)} to config.matcher${d.proxyKind === "middleware" ? ', with runtime: "nodejs"' : ""}.`,
+  and ${cdn ? `set config.matcher to ${formatMatcher(entries, "    ")}` : `add ${matcher.slice(1, -1)} to config.matcher`}${d.proxyKind === "middleware" ? ', with runtime: "nodejs"' : ""}.`,
     );
     return;
   }
@@ -104,15 +134,105 @@ import evolveConfig from "${relImport(f, configFile(d))}";
     d.proxyKind === "proxy"
       ? `${imports}
 export const proxy = createEvolveProxy(evolveConfig, { buildBundle });
-
-export const config = { matcher: ${matcher} };
-`
+${configExport(entries, null)}`
       : `${imports}
 export const middleware = createEvolveProxy(evolveConfig, { buildBundle });
-
-export const config = { matcher: ${matcher}, runtime: "nodejs" };
-`,
+${configExport(entries, "nodejs")}`,
   );
+}
+
+function configExport(entries: MatcherEntry[], runtime: string | null): string {
+  const rt = runtime ? `, runtime: "${runtime}"` : "";
+  if (entries.every((e) => typeof e === "string"))
+    return `\nexport const config = { matcher: ${formatMatcher(entries)}${rt} };\n`;
+  return `
+// cdnRouting: evolveMatcher(evolveConfig), written out (Next needs a literal;
+// \`npx next-evolve doctor\` checks it still matches evolve.config).
+export const config = {
+  matcher: ${formatMatcher(entries, "  ")},${runtime ? `\n  runtime: "${runtime}",` : ""}
+};
+`;
+}
+
+/**
+ * cdnRouting on an app whose proxy.ts init wrote earlier: swap the plain
+ * matcher for the cdnRouting one. Anything else gets instructions.
+ */
+function upgradeMatcher(
+  plan: Plan,
+  file: string,
+  src: string,
+  routes: RouteMode[],
+  entries: MatcherEntry[],
+): void {
+  const text = matcherSource(src);
+  const current = text ? evalMatcher(text) : null;
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  if (same(current, entries)) return;
+  if (text && same(current, matcherFor(routes))) {
+    plan.write(file, src.replace(text, formatMatcher(entries, "  ")));
+    return;
+  }
+  plan.manual.push(
+    `For cdnRouting, set config.matcher in ${file} to evolveMatcher(evolveConfig), written out:\n    ${formatMatcher(entries, "    ")}`,
+  );
+}
+
+const REWRITES = `async rewrites() {
+    return { beforeFiles: evolveRewrites(evolveConfig), afterFiles: [], fallback: [] };
+  },`;
+
+/**
+ * cdnRouting: `next.config` serves a returning visitor's variant from the
+ * route cookie (`evolveRewrites`). Creates next.config when there is none,
+ * edits a plain one, and gives instructions for anything it can't edit safely
+ * (own rewrites, CommonJS, a .mjs config next to a TypeScript evolve.config).
+ */
+export function planNextConfig(plan: Plan, d: Detection): void {
+  const file = d.nextConfigFile ?? (d.typescript ? "next.config.ts" : "next.config.mjs");
+  const cfgImport = relImport(file, configFile(d)) + (file.endsWith(".ts") ? "" : ".js");
+  const imports = `import { evolveRewrites } from "next-evolve/config";\nimport evolveConfig from "${cfgImport}";`;
+  const manual = (why: string): void => {
+    plan.manual.push(
+      `${why}. For cdnRouting, add to it:\n    ${imports.replace("\n", "\n    ")}\n    // in the config object (merge with your own beforeFiles rewrites, Evolve's first):\n    ${REWRITES.replace(/\n/g, "\n  ")}`,
+    );
+  };
+  const src = plan.read(file);
+  if (src === null) {
+    plan.write(
+      file,
+      `${d.typescript ? 'import type { NextConfig } from "next";\n' : ""}${imports}
+
+${d.typescript ? "const nextConfig: NextConfig = {" : "const nextConfig = {"}
+  // Evolve cdnRouting: a returning visitor's variant is served from the CDN.
+  ${REWRITES}
+};
+
+export default nextConfig;
+`,
+    );
+    return;
+  }
+  if (src.includes("evolveRewrites")) return;
+  const m = /(const\s+\w+\s*(?::\s*NextConfig\s*)?=\s*\{)|(export\s+default\s+(?:\(\s*)?\{)/.exec(
+    src,
+  );
+  const why = /\brewrites\s*[(:]/.test(src)
+    ? `${file} already has rewrites`
+    : file.endsWith(".cjs") || /module\.exports/.test(src)
+      ? `${file} is CommonJS`
+      : d.typescript && !file.endsWith(".ts")
+        ? `${file} can't import the TypeScript ${configFile(d)}`
+        : !m
+          ? `Couldn't find the config object in ${file}`
+          : null;
+  if (why || !m) {
+    manual(why ?? file);
+    return;
+  }
+  const at = m.index + m[0].length;
+  const edited = `${src.slice(0, at)}\n  // Evolve cdnRouting: a returning visitor's variant is served from the CDN.\n  ${REWRITES}${src.slice(at)}`;
+  plan.write(file, addImport(edited, imports));
 }
 
 /** Imports go after the last import line (or at the top). */

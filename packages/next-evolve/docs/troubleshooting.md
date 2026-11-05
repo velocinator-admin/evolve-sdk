@@ -21,6 +21,12 @@ Start with `npx next-evolve doctor`. It checks the env, key, database, bundle, p
 
 **`doctor`: "Proxy matcher … misses".** Every route in `evolve.config.ts` must be in `config.matcher`, plus `/(ev_.*)`.
 
+**`doctor`: "CDN routing: config.matcher … doesn't match evolveMatcher(evolveConfig)".** With `cdnRouting` on, the matcher literal in `proxy.ts` must be exactly what `evolveMatcher(evolveConfig)` returns (it changes when you add or remove a route). Re-run `npx next-evolve init --cdn-routing --routes "…"` or paste the literal `doctor` prints.
+
+**`doctor`: "CDN routing: … doesn't call evolveRewrites(evolveConfig)".** The matcher skips the proxy for returning visitors, but nothing serves their variant: they get a **404** on the tested page. Add the `rewrites()` from [configuration.md](configuration.md#cdn-routing-cdnrouting), or turn `cdnRouting` off and put the plain matcher back.
+
+**`doctor`: "CDN routing: cdnRouting is off in evolve.config, but config.matcher … skips the proxy".** You turned `cdnRouting` off but kept its matcher: visitors whose route cookie hasn't expired yet would skip the proxy and get a 404. Set the matcher back to the plain list `doctor` prints.
+
 ## Nothing is being tested
 
 **Every visitor sees control.** In order:
@@ -35,6 +41,10 @@ Start with `npx next-evolve doctor`. It checks the env, key, database, bundle, p
 **I keep seeing the same variant.** That's intended: a visitor keeps their assignment. Use a private window (each one is a new visitor), delete the `evolve_id` and `evolve_a` cookies, or use a **Preview** link from the experiment page.
 
 **A change in the dashboard doesn't show up.** The app picks up a new bundle when the sync webhook reaches it (seconds), or by polling: within one poll interval (60 s ± 10% in production, 5 s in development) of an instance's last check, on its next request. The request that triggers the check is still served the old bundle. In local development the webhook can't reach `localhost`, so it's polling only. If production is slow, check the Connect page's "Sync webhook" status. On Vercel without Global Config, only the instance that gets the webhook updates at once.
+
+**With `cdnRouting`: a paused experiment still shows its variant to me.** Expected for up to `cdnRouting.maxAgeSeconds` (default 60 s): while your `evolve_r_…` cookie lives, the page is served from the CDN without asking the proxy. After it expires, or with the cookie deleted, you get control. Lower `maxAgeSeconds` if that's too long ([configuration.md](configuration.md#cdn-routing-cdnrouting)).
+
+**With `cdnRouting`: repeat views still run the proxy** (the response has `Server-Timing: evolve;…`). Check that the first response set an `evolve_r_…` cookie (it doesn't for bots, without consent, for previews, on dynamic-mode routes, or when nothing runs on the route), that `next.config` calls `evolveRewrites()`, and that the matcher is the `evolveMatcher()` literal (`doctor` checks both).
 
 **A variant renders control and isn't counted.** Its props failed the component's schema (the log says `variant … failed its schema`), usually because the schema changed in code after the variant was made. Add a new variant.
 

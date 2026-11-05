@@ -18,6 +18,7 @@ import {
   planGoals,
   planInstrumentation,
   planLayout,
+  planNextConfig,
   planPackageJson,
   planProxy,
   planRouteHandler,
@@ -57,6 +58,7 @@ const FLAGS = {
   "dry-run": { type: "boolean" },
   mode: { type: "string" },
   routes: { type: "string" },
+  "cdn-routing": { type: "boolean" },
 } as const;
 
 const DB_HELP = `Evolve stores events in your own Postgres (its own "evolve" schema).
@@ -99,6 +101,13 @@ export async function initCommand(args: string[], deps: InitDeps): Promise<numbe
   if (d.cacheComponents && mode === "static") {
     err(
       "✗ cacheComponents is on, and static mode doesn't work with it: use --mode dynamic (the default with cacheComponents)",
+    );
+    return 1;
+  }
+  const cdn = Boolean(f["cdn-routing"]);
+  if (cdn && mode !== "static") {
+    err(
+      "✗ --cdn-routing needs static routes (dynamic routes always run the proxy): drop --mode dynamic, or drop --cdn-routing",
     );
     return 1;
   }
@@ -195,10 +204,11 @@ export async function initCommand(args: string[], deps: InitDeps): Promise<numbe
   const plan = new Plan(cwd);
   const routes: RouteMode[] = paths.map((path) => ({ path, mode }));
   const finalRoutes = planPages(plan, d, routes);
-  planConfig(plan, d, finalRoutes);
+  planConfig(plan, d, finalRoutes, cdn);
   planGoals(plan, d);
   planRouteHandler(plan, d);
-  planProxy(plan, d, finalRoutes);
+  planProxy(plan, d, finalRoutes, cdn);
+  if (cdn) planNextConfig(plan, d);
   planLayout(plan, d);
   planInstrumentation(plan, d);
   planPackageJson(plan);

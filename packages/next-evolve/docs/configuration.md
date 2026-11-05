@@ -19,23 +19,25 @@ export default defineConfig({
   cookies: { maxAgeDays: 365, domain: undefined },
   consent: undefined, // (req: Request) => boolean
   bots: { extraPatterns: [] },
+  cdnRouting: false, // or true, or { maxAgeSeconds: 60 } (since 0.6)
   debug: process.env.NODE_ENV !== "production",
 });
 ```
 
-| Option                         |                                                                                                                                                                                                                                                                                                          |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `routes`                       | Pages Evolve may test, by exact path (no wildcards or `[params]`, can't start with `/ev_`). `mode`: `"static"` (the page lives under `app/[evolve]/`, cached per variant) or `"dynamic"` (the page stays put, rendered per request). Add a route here **and** to the proxy matcher; `doctor` checks both |
-| `store`                        | `"auto"` uses Vercel Global Config when its env vars are set, else memory. `"memory"` or `"global-config"` force one                                                                                                                                                                                     |
-| `sync.pollSeconds`             | How often each instance checks for a new bundle (± 10% jitter)                                                                                                                                                                                                                                           |
-| `database.urlEnv`              | Which env var holds the database URL                                                                                                                                                                                                                                                                     |
-| `aggregate.maxMs`              | Time budget for one aggregate request; past it the response is partial and the cloud asks again                                                                                                                                                                                                          |
-| `aggregate.statementTimeoutMs` | Postgres `statement_timeout` per aggregation query                                                                                                                                                                                                                                                       |
-| `cookies.maxAgeDays`           | Lifetime of `evolve_id` and `evolve_a`                                                                                                                                                                                                                                                                   |
-| `cookies.domain`               | Set to `.example.com` to share assignments across subdomains                                                                                                                                                                                                                                             |
-| `consent`                      | Return `false` to serve control and set no cookies (e.g. before cookie consent)                                                                                                                                                                                                                          |
-| `bots.extraPatterns`           | Extra user-agent patterns (case-insensitive regular expressions) treated as bots                                                                                                                                                                                                                         |
-| `debug`                        | Extra logging                                                                                                                                                                                                                                                                                            |
+| Option                         |                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `routes`                       | Pages Evolve may test, by exact path (no wildcards or `[params]`, can't start with `/ev_`). `mode`: `"static"` (the page lives under `app/[evolve]/`, cached per variant) or `"dynamic"` (the page stays put, rendered per request). Add a route here **and** to the proxy matcher; `doctor` checks both                                                                                      |
+| `store`                        | `"auto"` uses Vercel Global Config when its env vars are set, else memory. `"memory"` or `"global-config"` force one                                                                                                                                                                                                                                                                          |
+| `sync.pollSeconds`             | How often each instance checks for a new bundle (± 10% jitter)                                                                                                                                                                                                                                                                                                                                |
+| `database.urlEnv`              | Which env var holds the database URL                                                                                                                                                                                                                                                                                                                                                          |
+| `aggregate.maxMs`              | Time budget for one aggregate request; past it the response is partial and the cloud asks again                                                                                                                                                                                                                                                                                               |
+| `aggregate.statementTimeoutMs` | Postgres `statement_timeout` per aggregation query                                                                                                                                                                                                                                                                                                                                            |
+| `cookies.maxAgeDays`           | Lifetime of `evolve_id` and `evolve_a`                                                                                                                                                                                                                                                                                                                                                        |
+| `cookies.domain`               | Set to `.example.com` to share assignments across subdomains                                                                                                                                                                                                                                                                                                                                  |
+| `consent`                      | Return `false` to serve control and set no cookies (e.g. before cookie consent)                                                                                                                                                                                                                                                                                                               |
+| `bots.extraPatterns`           | Extra user-agent patterns (case-insensitive regular expressions) treated as bots                                                                                                                                                                                                                                                                                                              |
+| `cdnRouting`                   | Opt-in (since 0.6), static-mode routes only: repeat views within `maxAgeSeconds` (default: `sync.pollSeconds`) are served from the CDN without running the proxy. A pause or rollback can then take up to `maxAgeSeconds` to reach a returning visitor. Needs `evolveRewrites()` in `next.config` and the `evolveMatcher()` literal in `proxy.ts`. See [CDN routing](#cdn-routing-cdnrouting) |
+| `debug`                        | Extra logging                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## Environment variables
 
@@ -61,13 +63,58 @@ Test-only variables (`EVOLVE_UNSAFE_TEST_PUBLIC_KEY`, `EVOLVE_UNSAFE_ALLOW_TEST_
 
 ## Cookies
 
-| Cookie      | Value                                                      | Set when                                                |
-| ----------- | ---------------------------------------------------------- | ------------------------------------------------------- |
-| `evolve_id` | Random visitor id                                          | First visit to a tested route with a running experiment |
-| `evolve_a`  | The visitor's assignments (`experiment:variant`, up to 20) | Same, and when an assignment changes                    |
-| `evolve_pv` | A signed preview token                                     | Opening a dashboard preview link (session cookie)       |
+| Cookie            | Value                                                                           | Set when                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `evolve_id`       | Random visitor id                                                               | First visit to a tested route with a running experiment                                                  |
+| `evolve_a`        | The visitor's assignments (`experiment:variant`, up to 20)                      | Same, and when an assignment changes                                                                     |
+| `evolve_pv`       | A signed preview token                                                          | Opening a dashboard preview link (session cookie)                                                        |
+| `evolve_r_<hash>` | The variant code for one route (`ev_…`), `Max-Age` = `cdnRouting.maxAgeSeconds` | Only with `cdnRouting`: when the proxy routes a visitor on a static-mode route with a running experiment |
 
 All are `HttpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` over https. None is set for bots, before consent, or without a valid bundle.
+
+## CDN routing (`cdnRouting`)
+
+On Vercel, running any proxy costs about 18–23 ms of TTFB per request, even one that does nothing: it's the platform invoking a function before the cache lookup, not Evolve's code (0.1–0.5 ms). `cdnRouting` lets repeat views skip the proxy:
+
+1. The first view runs the proxy as usual. It also sets `evolve_r_<hash>` (one per route) to the variant code it served, for `maxAgeSeconds`.
+2. While that cookie lives, a `next.config` rewrite sends the request straight to the cached variant page, and the proxy matcher skips it. Measured on Vercel: repeat views at the no-proxy TTFB (+0 ms), first views about +20 ms (unchanged).
+
+**The trade-off: staleness.** A returning visitor who has the cookie keeps getting the variant they were routed to until it expires, even if the experiment was paused, completed or rolled back in the meantime. That's bounded by `maxAgeSeconds`. The default (the poll interval, 60 s in production) keeps the same bound polling already gives: "a change reaches every instance within one poll interval". A larger value saves more proxy invocations and makes pauses and auto-rollbacks slower to reach returning visitors. Sticky assignment doesn't depend on it: it lives in `evolve_a`, so the visitor keeps their arm when the proxy runs again.
+
+Set it up with `npx next-evolve init --cdn-routing` (it writes all three pieces), or by hand:
+
+```ts
+// evolve.config.ts
+export default defineConfig({
+  routes: { "/": { mode: "static" } },
+  cdnRouting: true, // or { maxAgeSeconds: 60 }
+});
+
+// next.config.ts
+import type { NextConfig } from "next";
+import { evolveRewrites } from "next-evolve/config";
+import evolveConfig from "./evolve.config";
+
+const nextConfig: NextConfig = {
+  async rewrites() {
+    // Keep Evolve's first if you have your own beforeFiles rewrites.
+    return { beforeFiles: evolveRewrites(evolveConfig), afterFiles: [], fallback: [] };
+  },
+};
+export default nextConfig;
+```
+
+`proxy.ts` needs `config.matcher` to be the literal `evolveMatcher(evolveConfig)` returns (Next only accepts a literal there). `init --cdn-routing` writes it, and `npx next-evolve doctor` prints it whenever the one in `proxy.ts` differs. It keeps the plain entries for dynamic routes and `/(ev_.*)`, and for each static route adds three: run the proxy unless the route cookie holds a well-formed code, and always for previews (`evolve_pv` cookie or `?evolve_preview`). **Re-run `init --cdn-routing` (or update the literal) when you add a route**; `npx next-evolve doctor` fails when the literal and `evolve.config` disagree, or when `next.config` doesn't call `evolveRewrites()`.
+
+What stays the same:
+- Off by default. Without `cdnRouting`, `evolveRewrites()` returns `[]`, `evolveMatcher()` is the plain list, and the proxy is unchanged.
+- No route cookie for bots, without consent, for previews, on dynamic-mode routes, or when no experiment runs on the route.
+- Previews always run the proxy.
+- `/ev_*` paths are still never served directly (the proxy answers 404).
+
+**Forged cookies.** A visitor can edit their own route cookie. A code that isn't well-formed doesn't skip the proxy (it re-issues the cookie). A well-formed code the bundle doesn't know renders control, marked as not counted, and refetches the bundle at most once per 5 s per instance (like `collect`). Each distinct forged code still costs one page render (an ISR entry), the same as a request for any unknown `[slug]` page. It only ever affects the visitor who forged it.
+
+**Hosting.** Built for Vercel, whose CDN caches each rewritten variant path separately. Off Vercel, CDN-routed responses don't carry the proxy's `Cache-Control: private, no-store`, so a shared cache in front of the app must not cache tested routes by URL alone; otherwise leave `cdnRouting` off (it saves little on `next start`, where the proxy costs ~0.5 ms).
 
 ## Database
 

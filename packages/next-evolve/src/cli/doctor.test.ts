@@ -32,7 +32,7 @@ const ENV = {
 };
 
 /** An app `init` set up (static "/" and "/pricing"), so every check passes. */
-async function healthy(): Promise<string> {
+async function healthy(extra: string[] = []): Promise<string> {
   const dir = freshApp({
     "app/pricing/page.tsx": "export default function P() {\n  return null;\n}\n",
   });
@@ -45,6 +45,7 @@ async function healthy(): Promise<string> {
       "--yes",
       "--routes",
       "/ /pricing",
+      ...extra,
     ],
     {
       env: { EVOLVE_CLOUD_URL: cloud.url, EVOLVE_UNSAFE_TEST_PUBLIC_KEY: TEST_PUBLIC_KEY_ENV },
@@ -238,5 +239,51 @@ describe("next-evolve doctor (spec §16.2)", () => {
     const checkDb = vi.fn(async () => ({ ok: false as const, error: "down" }));
     expect(await doctorCommand([], { ...deps, checkDb })).toBe(1);
     expect(lines.join("\n")).toMatch(/✗ Database: down/);
+  });
+
+  it("cdnRouting: matcher literal must equal evolveMatcher(config), next.config must call evolveRewrites() (T19.5a)", async () => {
+    const dir = await healthy(["--cdn-routing"]);
+    const CDN = { ...CONFIG, cdnRouting: true } as EvolveConfig;
+    const cdn = (over: Partial<DoctorDeps> = {}, env: Record<string, string | undefined> = {}) =>
+      doctor(dir, { load: async () => ({ config: CDN }), ...over }, env);
+    let c = await cdn();
+    expect(failing(c)).toEqual([]);
+    expect(by(c, "CDN routing")).toMatchObject({ status: "ok" });
+
+    // A route added to evolve.config but not to the literal.
+    const more = {
+      ...CDN,
+      routes: { ...CDN.routes, "/about": { mode: "static" } },
+    } as EvolveConfig;
+    c = await doctor(dir, { load: async () => ({ config: more }) });
+    expect(by(c, "CDN routing")).toMatchObject({
+      status: "fail",
+      detail: expect.stringMatching(/doesn't match evolveMatcher[\s\S]*\/about/),
+    });
+
+    // next.config without evolveRewrites(): a cookie would skip the proxy and 404.
+    const nextFile = join(dir, "next.config.ts");
+    writeFileSync(nextFile, "export default {};\n");
+    c = await cdn();
+    expect(by(c, "CDN routing")).toMatchObject({
+      status: "fail",
+      detail: expect.stringMatching(/evolveRewrites/),
+    });
+
+    // cdnRouting turned off in evolve.config, proxy.ts still has the cookie matcher.
+    c = await doctor(dir);
+    expect(by(c, "CDN routing")).toMatchObject({
+      status: "fail",
+      detail: expect.stringMatching(/cdnRouting is off/),
+    });
+
+    // Off Vercel the CDN warning says why it matters more.
+    c = await cdn({}, { VERCEL: undefined });
+    expect(by(c, "CDN").detail).toMatch(/cdnRouting/);
+  });
+
+  it("without cdnRouting there is no CDN routing check", async () => {
+    const c = await doctor(await healthy());
+    expect(c.map((x) => x.name)).not.toContain("CDN routing");
   });
 });
