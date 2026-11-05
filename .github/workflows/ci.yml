@@ -30,6 +30,11 @@ jobs:
           restore-keys: turbo-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # The packages first, then link their bins: install ran before dist/
+      # existed, and a turbo cache hit restores dist/ without the
+      # `next-evolve` bin the fixture's prebuild (`next-evolve pull`) calls.
+      - run: pnpm turbo run build --cache-dir=.turbo --filter='./packages/*'
+      - run: pnpm install --frozen-lockfile --offline
       - run: pnpm build --cache-dir=.turbo
       - run: pnpm typecheck --cache-dir=.turbo
       - run: pnpm test --cache-dir=.turbo
