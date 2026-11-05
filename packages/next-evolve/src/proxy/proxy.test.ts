@@ -9,7 +9,8 @@ import {
 } from "next/experimental/testing/server";
 import type { NextResponse } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GOOGLEBOT, keys, request, storeWith } from "../../test/proxy-helpers";
+import { GOOGLEBOT, keys, request, signBundle, storeWith } from "../../test/proxy-helpers";
+import { sampleBundle } from "../../test/samples";
 import { cdnCookieName } from "../config/cdn";
 import { defineConfig, resolveConfig } from "../config/config";
 import { createMemoryStore } from "../store/memory";
@@ -381,5 +382,58 @@ describe("cdnRouting (repeat views skip the proxy)", () => {
 
   it("is off by default", () => {
     expect(run(request("/"))!.cookies.get(routeCookie)).toBeUndefined();
+  });
+});
+
+// T19.5 drill: an idle instance kept serving an old bundle for minutes.
+describe("stale bundle: a cookie naming what the bundle doesn't know", () => {
+  const storeFetching = () => {
+    const onDemandFetches = vi.fn();
+    const store = createMemoryStore({
+      site: TEST_SITE,
+      keys,
+      pollMs: 60_000,
+      initialToken: signBundle(sampleBundle()),
+      fetcher: async (_etag, o) => {
+        if (o?.cloud) onDemandFetches();
+        return { status: "not_modified" };
+      },
+    });
+    return { store, onDemandFetches };
+  };
+
+  it.each([
+    ["an experiment it doesn't know", "zzzzzz:yyyyyy"],
+    ["a variant it doesn't know", "k3j9x2:yyyyyy"],
+  ])("%s → one background refresh from the cloud, handed to waitUntil", async (_, cookie) => {
+    const { store, onDemandFetches } = storeFetching();
+    const waitUntil = vi.fn();
+    applyEvolve(
+      config,
+      request("/", { cookies: { evolve_id: "AAAAAAAAAAAAAAAAAAAAAA", evolve_a: cookie } }),
+      { waitUntil },
+      { store },
+    );
+    await Promise.all(waitUntil.mock.calls.map(([p]) => p));
+    expect(onDemandFetches).toHaveBeenCalledTimes(1);
+  });
+
+  it("known pairs and the excluded marker don't; repeats share the on-demand window", async () => {
+    const { store, onDemandFetches } = storeFetching();
+    const waitUntil = vi.fn();
+    const visit = (a: string) =>
+      applyEvolve(
+        config,
+        request("/", { cookies: { evolve_id: "AAAAAAAAAAAAAAAAAAAAAA", evolve_a: a } }),
+        { waitUntil },
+        { store },
+      );
+    visit("k3j9x2:c1d2e3");
+    visit("k3j9x2:x");
+    await Promise.all(waitUntil.mock.calls.map(([p]) => p));
+    expect(onDemandFetches).not.toHaveBeenCalled();
+    for (let i = 0; i < 10; i++) visit("zzzzzz:yyyyyy"); // forged
+    await Promise.all(waitUntil.mock.calls.map(([p]) => p));
+    expect(onDemandFetches).toHaveBeenCalledTimes(1);
   });
 });

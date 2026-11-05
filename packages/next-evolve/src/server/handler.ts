@@ -6,11 +6,11 @@ import { createBotDetector } from "../core/bots";
 import { logRateLimited } from "../core/log";
 import { getSql } from "../db/client";
 import { globalConfigSettings, writeGlobalConfig } from "../store/global-config";
-import type { BundleStore } from "../store/memory";
+import { onDemand } from "../store/on-demand";
 import { getBundleStore } from "../store/runtime";
 import { handleAggregate } from "./aggregate-route";
-import { createBundleRefresher, handleCollect } from "./collect";
-import { runtimeWriter, scheduleFlush, setRuntime } from "./runtime";
+import { handleCollect } from "./collect";
+import { backgroundTask, runtimeWriter, scheduleFlush, setRuntime } from "./runtime";
 import { handleSync, revalidateBundle } from "./sync-route";
 import { handleTrack } from "./track-route";
 
@@ -19,17 +19,6 @@ export type EvolveHandlerOptions = {
   goals?: Goals;
   env?: Record<string, string | undefined>;
 };
-
-const refreshers = new WeakMap<BundleStore, () => Promise<void>>();
-/** One rate-limited refresher per store (collect, unknown exposures). */
-function collectRefresher(store: BundleStore): () => Promise<void> {
-  let r = refreshers.get(store);
-  if (!r) {
-    r = createBundleRefresher(() => store.refresh());
-    refreshers.set(store, r);
-  }
-  return r;
-}
 
 const notFound = () => Response.json({ error: "not_found" }, { status: 404 });
 
@@ -57,11 +46,14 @@ export function createEvolveHandler(opts: EvolveHandlerOptions) {
         case "collect": {
           const writer = runtimeWriter();
           const store = getBundleStore(cfg, { env: env() });
+          // The poll peek() may start must finish before a serverless instance
+          // is frozen, or the fetch hangs until it thaws (T19.5).
+          const waitUntil = await backgroundTask();
           const status = await handleCollect(req, {
             config: cfg,
             goals: opts.goals,
-            bundle: () => store?.peek() ?? null,
-            ...(store ? { refreshBundle: collectRefresher(store) } : {}),
+            bundle: () => store?.peek(waitUntil) ?? null,
+            ...(store ? { refreshBundle: onDemand(store).soon } : {}),
             isBot,
             writer,
           });

@@ -8,7 +8,7 @@ import {
 import { generateTestKeyPair, signJws } from "@next-evolve/protocol/testing";
 import { describe, expect, it, vi } from "vitest";
 import type { FetchBundleResult } from "./fetch";
-import { createMemoryStore } from "./memory";
+import { createMemoryStore, ERROR_RETRY_MS, STUCK_FETCH_MS } from "./memory";
 
 const SITE = "site_memstore00";
 const key = generateTestKeyPair("k1");
@@ -35,8 +35,13 @@ function token(o: { ver: number; iat?: number; exp?: number; site?: string; pv?:
 function setup(opts: { initial?: string; pollMs?: number; random?: number } = {}) {
   let t = T0;
   const replies: Array<(r: FetchBundleResult) => void> = [];
+  const all: Array<(r: FetchBundleResult) => void> = [];
   const fetcher = vi.fn(
-    (_etag: string | null) => new Promise<FetchBundleResult>((r) => replies.push(r)),
+    (_etag: string | null, _o?: { cloud?: boolean }) =>
+      new Promise<FetchBundleResult>((r) => {
+        replies.push(r);
+        all.push(r);
+      }),
   );
   const store = createMemoryStore({
     site: SITE,
@@ -56,6 +61,8 @@ function setup(opts: { initial?: string; pollMs?: number; random?: number } = {}
     fetcher,
     reply,
     advance: (ms: number) => (t += ms),
+    /** Settles the i-th fetch ever started (out of order). */
+    replies_settle: (i: number, r: FetchBundleResult) => all[i]!(r),
     errors: vi.spyOn(console, "error").mockImplementation(() => {}),
     infos: vi.spyOn(console, "info").mockImplementation(() => {}),
   };
@@ -85,9 +92,9 @@ describe("memory bundle store", () => {
   });
 
   it("keeps one fetch in flight", () => {
-    const s = setup();
+    const s = setup({ pollMs: 1_000 });
     s.store.peek();
-    s.advance(120_000);
+    s.advance(STUCK_FETCH_MS - 1); // due again, but the first fetch is still live
     s.store.peek();
     void s.store.refresh();
     expect(s.fetcher).toHaveBeenCalledTimes(1);
@@ -166,5 +173,55 @@ describe("refresh({ force })", () => {
     await s.reply({ status: "ok", token: token({ ver: 7 }), etag: null });
     await forced;
     expect(s.store.current()?.ver).toBe(7);
+  });
+});
+
+// T19.5 drill: idle Vercel instances kept an old bundle for minutes.
+describe("stale instances (T19.5)", () => {
+  it("refresh({ cloud: true }) tells the fetcher to ask the cloud now", async () => {
+    const s = setup();
+    void s.store.refresh({ cloud: true });
+    expect(s.fetcher).toHaveBeenLastCalledWith(null, { cloud: true });
+    await s.reply({ status: "not_modified" });
+    void s.store.refresh();
+    expect(s.fetcher).toHaveBeenLastCalledWith(null);
+  });
+
+  it("a fetch that never settles (frozen with its instance) stops blocking refreshes after STUCK_FETCH_MS", async () => {
+    const s = setup();
+    s.store.peek(); // background poll; its promise never settles
+    s.advance(STUCK_FETCH_MS - 1);
+    void s.store.refresh();
+    expect(s.fetcher).toHaveBeenCalledTimes(1); // still shares it
+    s.advance(1);
+    const fresh = s.store.refresh();
+    expect(s.fetcher).toHaveBeenCalledTimes(2);
+    s.advance(1);
+    s.store.peek(); // the new fetch is the one in flight now
+    expect(s.fetcher).toHaveBeenCalledTimes(2);
+    s.replies_settle(1, { status: "ok", token: token({ ver: 4 }), etag: null });
+    await fresh;
+    expect(s.store.current()?.ver).toBe(4);
+    // The old fetch settling late can't replace the newer bundle (rollback check).
+    s.replies_settle(0, { status: "ok", token: token({ ver: 2 }), etag: null });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.store.current()?.ver).toBe(4);
+  });
+
+  it(`a failed fetch (network/5xx) is retried after ${ERROR_RETRY_MS} ms, not a full poll`, async () => {
+    const s = setup({ initial: token({ ver: 3 }) });
+    s.store.peek();
+    await s.reply({ status: "error", code: "network" });
+    s.advance(ERROR_RETRY_MS - 1);
+    s.store.peek();
+    expect(s.fetcher).toHaveBeenCalledTimes(1);
+    s.advance(1);
+    s.store.peek();
+    expect(s.fetcher).toHaveBeenCalledTimes(2);
+    // 401 (revoked key) and 404 (no bundle yet) keep the normal poll.
+    await s.reply({ status: "error", code: 401 });
+    s.advance(ERROR_RETRY_MS);
+    s.store.peek();
+    expect(s.fetcher).toHaveBeenCalledTimes(2);
   });
 });

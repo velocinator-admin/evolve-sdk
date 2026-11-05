@@ -52,42 +52,27 @@ export type CollectDeps = {
   goals: Goals | undefined;
   bundle: () => BundlePayload | null;
   /**
-   * Fetches the bundle now (see {@link createBundleRefresher}). Called when a
-   * beacon names an experiment/variant the current bundle doesn't know, so a
-   * cold or stale instance doesn't drop an exposure the proxy just assigned.
+   * Refreshes the bundle on demand (the store's shared, rate-limited
+   * `onDemand(store).soon`). Called when a beacon names an experiment/variant
+   * the current bundle doesn't know: the instance may be cold or behind the
+   * proxy that assigned it, and dropping the pair would lose a real visit.
    */
   refreshBundle?: () => Promise<void>;
+  /** Longest a beacon waits for refreshes, in total (default {@link COLLECT_REFRESH_CAP_MS}). */
+  refreshCapMs?: number;
   isBot: (ua: string | null) => boolean;
   writer: Writer;
   now?: () => Date;
 };
 
 /**
- * Wraps a store refresh for collect: at most one fetch per `minIntervalMs` per
- * instance (forged beacons with made-up ids can't turn into a cloud fetch each),
- * and never waits longer than `capMs`.
+ * Upper bound on a beacon's wait for refreshes: the on-demand window (5 s) plus
+ * one bundle fetch (5 s timeout) and some slack. Beacons are fire-and-forget,
+ * so this only holds the function invocation, never a visitor.
  */
-export function createBundleRefresher(
-  refresh: () => Promise<void>,
-  opts: { minIntervalMs?: number; capMs?: number; now?: () => number } = {},
-): () => Promise<void> {
-  const minIntervalMs = opts.minIntervalMs ?? 5_000;
-  const capMs = opts.capMs ?? 2_000;
-  const now = opts.now ?? Date.now;
-  let last = -Infinity;
-  return async () => {
-    if (now() - last < minIntervalMs) return;
-    last = now();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([
-      refresh().catch(() => {}),
-      new Promise<void>((r) => {
-        timer = setTimeout(r, capMs);
-      }),
-    ]);
-    clearTimeout(timer);
-  };
-}
+export const COLLECT_REFRESH_CAP_MS = 12_000;
+/** The first refresh may share a fetch that started before the publish; one more round covers that. */
+const REFRESH_ROUNDS = 2;
 
 /** Same-origin check: `Origin` must match the host; without it, `Sec-Fetch-Site` must say so. */
 export function isSameOrigin(req: Request): boolean {
@@ -150,9 +135,19 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
     const exp = bundle?.routing.experiments[e];
     return bundle?.variants[v]?.exp === e && Boolean(exp?.variants.some((x) => x.id === v));
   };
-  if (deps.refreshBundle && events.some((e) => e.t === "exp" && !known(e.e, e.v))) {
-    await deps.refreshBundle();
-    bundle = deps.bundle();
+  const unknown = () => events.some((e) => e.t === "exp" && !known(e.e, e.v));
+  if (deps.refreshBundle && unknown()) {
+    const refresh = deps.refreshBundle;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const capped = new Promise<"cap">((r) => {
+      timer = setTimeout(() => r("cap"), deps.refreshCapMs ?? COLLECT_REFRESH_CAP_MS);
+    });
+    for (let round = 0; round < REFRESH_ROUNDS && unknown(); round++) {
+      const r = await Promise.race([refresh().catch(() => {}), capped]);
+      bundle = deps.bundle();
+      if (r === "cap") break;
+    }
+    clearTimeout(timer);
   }
   const exposures: ExposureRow[] = [];
   const rows: EventRow[] = [];

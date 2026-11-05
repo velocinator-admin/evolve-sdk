@@ -183,3 +183,50 @@ describe("writeGlobalConfig (sync route)", () => {
     ).toBe(false);
   });
 });
+
+// T19.5 drill: the fixture's item was a days-old bundle (read-only Global Config),
+// so a refresh inside the 60 s cloud window found nothing newer.
+describe("Global Config fetcher, stale item (T19.5)", () => {
+  const item = globalConfigItemKey(TEST_SITE);
+
+  it("{ cloud: true } asks the cloud even inside cloudEveryMs", async () => {
+    const stale = publish().token;
+    const fresh = publish().token;
+    const cloudFetch = vi.fn(async () => ({ status: "ok" as const, token: fresh, etag: null }));
+    const f = createGlobalConfigFetcher({
+      site: TEST_SITE,
+      read: async (k) => (k === item ? stale : undefined),
+      cloud: cloudFetch,
+      cloudEveryMs: 60_000,
+      now: () => 0,
+    });
+    await f(null);
+    expect(await f(null)).toEqual({ status: "ok", token: stale, etag: null });
+    expect(await f(null, { cloud: true })).toEqual({ status: "ok", token: fresh, etag: null });
+    expect(cloudFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("a failed cloud call doesn't start a new cloudEveryMs wait: the next read asks again", async () => {
+    const stale = publish().token;
+    const fresh = publish().token;
+    let fail = true;
+    const cloudFetch = vi.fn(async () =>
+      fail
+        ? ({ status: "error", code: "network" } as const)
+        : ({ status: "ok", token: fresh, etag: null } as const),
+    );
+    let t = 0;
+    const f = createGlobalConfigFetcher({
+      site: TEST_SITE,
+      read: async () => stale,
+      cloud: cloudFetch,
+      cloudEveryMs: 60_000,
+      now: () => t,
+    });
+    expect(await f(null)).toEqual({ status: "ok", token: stale, etag: null });
+    fail = false;
+    t += 10_000;
+    expect(await f(null)).toEqual({ status: "ok", token: fresh, etag: null });
+    expect(cloudFetch).toHaveBeenCalledTimes(2);
+  });
+});

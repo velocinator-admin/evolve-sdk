@@ -58,3 +58,23 @@ export async function scheduleFlush(writer: Writer): Promise<void> {
     await writer.flush();
   }
 }
+
+/**
+ * `waitUntil` for background work started during a request: Next's `after()`
+ * on a request, so serverless hosts keep the instance alive until it settles.
+ * Undefined outside Next (tests, scripts), where nothing freezes the process.
+ */
+export async function backgroundTask(): Promise<((p: Promise<unknown>) => void) | undefined> {
+  try {
+    const { after } = await import("next/server");
+    return (p) => {
+      try {
+        after(() => p);
+      } catch {
+        // Not inside a request scope: nothing to keep alive.
+      }
+    };
+  } catch {
+    return undefined;
+  }
+}

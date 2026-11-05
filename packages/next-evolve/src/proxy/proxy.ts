@@ -1,4 +1,10 @@
-import { CONTROL_CODE, encodeCode, newAnonId, verifyPreview } from "@next-evolve/protocol";
+import {
+  type BundlePayload,
+  CONTROL_CODE,
+  encodeCode,
+  newAnonId,
+  verifyPreview,
+} from "@next-evolve/protocol";
 import { type NextFetchEvent, type NextRequest, NextResponse } from "next/server";
 import { cdnCookieName } from "../config/cdn";
 import { type EvolveConfig, normalizePath, resolveConfig } from "../config/config";
@@ -8,11 +14,13 @@ import { HEADER_CODE, HEADER_PATH } from "../core/constants";
 import {
   ANON_COOKIE,
   ASSIGN_COOKIE,
+  EXCLUDED,
   PREVIEW_COOKIE,
   parseAssignments,
   serializeAssignments,
 } from "../core/cookies";
 import { logRateLimited } from "../core/log";
+import { onDemand } from "../store/on-demand";
 import { coldStart, getBundleStore, getSiteIdentity, type RuntimeOptions } from "../store/runtime";
 
 export type EvolveProxyOptions = RuntimeOptions & {
@@ -62,8 +70,8 @@ export function applyEvolve(
       isBot = createBotDetector(cfg.botPatterns);
       detectors.set(config, isBot);
     }
-    const bundle =
-      getBundleStore(cfg, opts)?.peek(event ? (p) => event.waitUntil(p) : undefined) ?? null;
+    const store = getBundleStore(cfg, opts);
+    const bundle = store?.peek(event ? (p) => event.waitUntil(p) : undefined) ?? null;
 
     let code = CONTROL_CODE;
     const setCookies: [name: string, value: string, session?: boolean, maxAge?: number][] = [];
@@ -79,6 +87,13 @@ export function applyEvolve(
       if (fromQuery) setCookies.push([PREVIEW_COOKIE, fromQuery, true]);
     } else if (bundle && !isBot(req.headers.get("user-agent")) && cfg.consent?.(req) !== false) {
       const cookie = parseAssignments(req.cookies.get(ASSIGN_COOKIE)?.value);
+      // A pair this bundle doesn't know was assigned by a newer bundle (or is
+      // forged): this instance may be stale, so ask the cloud in the background
+      // (shared, rate-limited budget; never on the request path).
+      if (store && hasUnknownPair(bundle, cookie)) {
+        const p = onDemand(store).nowOrSkip();
+        event?.waitUntil(p);
+      }
       const known = req.cookies.get(ANON_COOKIE)?.value;
       const anon = known || newAnonId();
       const a = assign(bundle, path, cookie, opts.random ?? visitorDraw(anon));
@@ -122,6 +137,15 @@ export function applyEvolve(
     res.headers.set("cache-control", "private, no-store");
   res.headers.set("server-timing", `evolve;dur=${(performance.now() - t0).toFixed(3)}`);
   return res;
+}
+
+function hasUnknownPair(bundle: BundlePayload, cookie: ReadonlyMap<string, string>): boolean {
+  for (const [exp, v] of cookie) {
+    const e = bundle.routing.experiments[exp];
+    if (!e) return true;
+    if (v !== EXCLUDED && !e.variants.some((x) => x.id === v)) return true;
+  }
+  return false;
 }
 
 function rewrite(req: NextRequest, code: string, path: string): NextResponse {

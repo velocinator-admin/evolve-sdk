@@ -45,6 +45,8 @@
 
 "Within one poll interval" means up to ~66 s after an instance's last check, on its next request (that request is still served the old bundle; the fetch runs in the background).
 
+An instance that sees an experiment or variant its bundle doesn't know asks the cloud at once instead of waiting for its poll (since 0.6.1). It sees one when a returning visitor's cookie names it (the proxy refreshes in the background) or when a beacon reports it (collect waits for the refresh, then counts the exposure and its vitals). That also covers a Global Config item that has fallen behind. Each instance makes at most one such fetch per 5 s, shared by the proxy, collect and the render path, so made-up ids can't turn into a cloud fetch each. A failed fetch (network or 5xx) is retried after 10 s instead of a full poll interval.
+
 ### Vercel + Global Config (recommended on Vercel)
 
 Without it, the sync webhook reaches one instance and the rest catch up by polling. With a [Global Config](https://vercel.com/docs/edge-config) store, the sync route writes the bundle there and every instance sees it within ~10 s.
@@ -52,7 +54,7 @@ Without it, the sync webhook reaches one instance and the rest catch up by polli
 1. Create a Global Config store and connect it to the project.
 2. Set `EVOLVE_GLOBAL_CONFIG` (the store's connection string), `EVOLVE_GLOBAL_CONFIG_ID` (`ecfg_…`), `EVOLVE_VERCEL_API_TOKEN` (a Vercel access token that can write the store) and, for a team-owned store, `EVOLVE_VERCEL_TEAM_ID`.
 
-Bundles read from the store are verified like any other. Without the token the store is read-only and the sync route logs so.
+Bundles read from the store are verified like any other. Without the token the store is read-only and the sync route logs so. A read-only store keeps whatever bundle was last written to it, so instances fall back to their 60 s cloud poll for changes (plus the on-demand refresh above). Set the token, or remove `EVOLVE_GLOBAL_CONFIG`.
 
 ### Node server / Docker
 

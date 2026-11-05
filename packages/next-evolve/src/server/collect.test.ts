@@ -4,7 +4,8 @@ import { sampleBundle } from "../../test/samples";
 import { defineConfig, resolveConfig } from "../config/config";
 import { defineGoals } from "../config/goals";
 import { createBotDetector } from "../core/bots";
-import { type CollectDeps, createBundleRefresher, handleCollect } from "./collect";
+import { createRefreshLimiter } from "../store/on-demand";
+import { type CollectDeps, handleCollect } from "./collect";
 
 const ANON = "AAAAAAAAAAAAAAAAAAAAAA";
 const UA =
@@ -121,24 +122,88 @@ describe("collect", () => {
     expect(refreshes).toBe(1);
   });
 
-  it("refreshes for unknown exposures at most once per interval and waits at most the cap", async () => {
-    let t = 0;
+  // T19.5 drill: stale instances dropped real visits' exposures and vitals.
+  it("a refresh that predates the publish isn't the last word: one more round, then counted", async () => {
     let calls = 0;
-    const never = new Promise<void>(() => {});
-    const refresh = createBundleRefresher(
-      () => {
-        calls++;
-        return calls === 1 ? Promise.resolve() : never;
-      },
-      { minIntervalMs: 5_000, capMs: 20, now: () => t },
+    let current = sampleBundle((b) => {
+      b.ver = 2;
+      delete b.routing.experiments.k3j9x2;
+    });
+    deps.bundle = () => current;
+    deps.refreshBundle = async () => {
+      calls++;
+      if (calls === 2) current = sampleBundle(); // the shared fetch was older; this one is new
+    };
+    await handleCollect(
+      req({
+        v: 1,
+        events: [
+          { t: "exp", e: "k3j9x2", v: "c1d2e3", p: "/" },
+          { t: "cwv", m: "lcp", v: 1850, p: "/" },
+        ],
+      }),
+      deps,
     );
-    await refresh();
-    await refresh(); // within the interval: no fetch
-    expect(calls).toBe(1);
-    t = 5_000;
-    const started = Date.now();
-    await refresh(); // hangs → capped
     expect(calls).toBe(2);
+    expect(w.rows.exposures.map((e) => e.variant_id)).toEqual(["c1d2e3"]);
+    expect(w.rows.vitals.map((v) => [v.variant_id, v.metric])).toEqual([["c1d2e3", "lcp"]]);
+  });
+
+  it("concurrent beacons for a pair the instance doesn't know all wait for the same refresh", async () => {
+    let current: ReturnType<typeof sampleBundle> | null = null;
+    let fetches = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const limiter = createRefreshLimiter(async () => {
+      fetches++;
+      await gate;
+      current = sampleBundle();
+    });
+    deps.bundle = () => current;
+    deps.refreshBundle = limiter.soon;
+    const beacon = (v: number) =>
+      handleCollect(
+        req({
+          v: 1,
+          events: [
+            { t: "exp", e: "k3j9x2", v: "c1d2e3", p: "/" },
+            { t: "cwv", m: "lcp", v, p: "/" },
+          ],
+        }),
+        deps,
+      );
+    const all = Promise.all([beacon(400), beacon(500), beacon(600)]);
+    await new Promise((r) => setTimeout(r, 10));
+    release();
+    expect(await all).toEqual([204, 204, 204]);
+    expect(fetches).toBe(1);
+    expect(w.rows.exposures).toHaveLength(3);
+    expect(w.rows.vitals).toHaveLength(3);
+  });
+
+  it("forged pairs: at most two refresh rounds, then dropped; a hanging refresh is capped", async () => {
+    let calls = 0;
+    deps.refreshBundle = async () => {
+      calls++;
+    };
+    await handleCollect(
+      req({ v: 1, events: [{ t: "exp", e: "zzzzzz", v: "yyyyyy", p: "/" }] }),
+      deps,
+    );
+    expect(calls).toBe(2);
+    expect(w.rows.exposures).toEqual([]);
+
+    deps.refreshBundle = () => new Promise<void>(() => {});
+    deps.refreshCapMs = 30;
+    const started = Date.now();
+    expect(
+      await handleCollect(
+        req({ v: 1, events: [{ t: "exp", e: "zzzzzz", v: "yyyyyy", p: "/" }] }),
+        deps,
+      ),
+    ).toBe(204);
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 

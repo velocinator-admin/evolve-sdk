@@ -74,8 +74,9 @@ const newer = (a: string, b: string) => {
 
 /**
  * Fetcher for the memory store: reads Global Config every call; also asks the
- * cloud when Global Config is empty or every `cloudEveryMs` (so a missed
- * webhook or a stale item can't freeze the app), and returns the newer token.
+ * cloud when Global Config is empty, every `cloudEveryMs` (so a missed webhook
+ * or a stale item can't freeze the app) and on demand (`{ cloud: true }`), and
+ * returns the newer token.
  */
 export function createGlobalConfigFetcher(opts: {
   site: string;
@@ -83,11 +84,11 @@ export function createGlobalConfigFetcher(opts: {
   cloud?: (etag: string | null) => Promise<FetchBundleResult>;
   cloudEveryMs: number;
   now?: () => number;
-}): (etag: string | null) => Promise<FetchBundleResult> {
+}): (etag: string | null, o?: { cloud?: boolean }) => Promise<FetchBundleResult> {
   const now = opts.now ?? Date.now;
   const key = globalConfigItemKey(opts.site);
   let lastCloud = -Infinity;
-  return async (etag) => {
+  return async (etag, o) => {
     let fromConfig: string | null = null;
     try {
       const v = await opts.read(key);
@@ -96,9 +97,11 @@ export function createGlobalConfigFetcher(opts: {
       if (!opts.cloud) return { status: "error", code: "network", message: String(e) };
     }
     let fromCloud: string | null = null;
-    if (opts.cloud && (!fromConfig || now() - lastCloud >= opts.cloudEveryMs)) {
-      lastCloud = now();
+    // `cloud`: an on-demand refresh (the item can be far behind when Global
+    // Config is read-only). A failed call doesn't count, so the next read retries.
+    if (opts.cloud && (o?.cloud || !fromConfig || now() - lastCloud >= opts.cloudEveryMs)) {
       const r = await opts.cloud(fromConfig ? null : etag);
+      if (r.status !== "error") lastCloud = now();
       if (r.status === "ok") fromCloud = r.token;
       else if (!fromConfig) return r;
     }

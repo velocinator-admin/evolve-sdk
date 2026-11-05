@@ -14,18 +14,34 @@ export type BundleStore = {
    * Fetches now (one in flight). Resolves once done. `force`: a fetch already
    * in flight may predate a publish, so wait for it and fetch again.
    */
-  refresh(opts?: { force?: boolean }): Promise<void>;
+  refresh(opts?: RefreshOptions): Promise<void>;
   /** The current bundle without side effects (no refresh; expiry not applied). */
   current(): BundlePayload | null;
   /** Raw token of the current bundle (for persistence). */
   token(): string | null;
 };
 
+export type RefreshOptions = {
+  /** A fetch already in flight may predate a publish: wait for it and fetch again. */
+  force?: boolean;
+  /** Ask the cloud now, not only a cache in front of it (Global Config). For on-demand refreshes. */
+  cloud?: boolean;
+};
+
+/**
+ * A fetch in flight longer than this is treated as lost: on serverless an
+ * instance can be frozen with a background fetch it didn't hand to
+ * `waitUntil`, and that promise may never settle. (Fetches time out at 5 s.)
+ */
+export const STUCK_FETCH_MS = 15_000;
+/** After a network or 5xx failure, check again this soon (capped at the poll interval). */
+export const ERROR_RETRY_MS = 10_000;
+
 export type MemoryStoreOptions = {
   site: string;
   keys: KeyRing;
   /** Fetches from the cloud. Omit for a static store (build bundle only). */
-  fetcher?: (etag: string | null) => Promise<FetchBundleResult>;
+  fetcher?: (etag: string | null, opts?: { cloud?: boolean }) => Promise<FetchBundleResult>;
   pollMs: number;
   initialToken?: string | null;
   now?: () => number;
@@ -46,9 +62,15 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
   let etag: string | null = null;
   let nextCheck = 0;
   let inflight: Promise<void> | null = null;
+  let inflightAt = 0;
+  const live = () => inflight !== null && now() - inflightAt < STUCK_FETCH_MS;
 
   const schedule = () => {
     nextCheck = now() + opts.pollMs * (0.9 + 0.2 * random());
+  };
+
+  const retrySoon = () => {
+    nextCheck = Math.min(nextCheck, now() + Math.min(opts.pollMs, ERROR_RETRY_MS));
   };
 
   let ready = false;
@@ -71,12 +93,13 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
     return true;
   }
 
-  function refresh(o: { force?: boolean } = {}): Promise<void> {
+  function refresh(o: RefreshOptions = {}): Promise<void> {
     if (!opts.fetcher) return Promise.resolve();
-    if (inflight) return o.force ? inflight.then(() => refresh()) : inflight;
+    if (inflight && live())
+      return o.force ? inflight.then(() => refresh({ cloud: o.cloud })) : inflight;
     schedule();
-    inflight = opts
-      .fetcher(etag)
+    const f = opts.fetcher;
+    const p: Promise<void> = (o.cloud ? f(etag, { cloud: true }) : f(etag))
       .then((res) => {
         if (res.status === "ok") load(res.token);
         else if (res.status === "error" && res.code === 404 && res.message?.includes("no_bundle")) {
@@ -90,13 +113,20 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
           );
         } else if (res.status === "error") {
           logRateLimited(`fetch:${res.code}`, `bundle fetch failed (${res.code})`, res.message);
+          // A timeout or outage shouldn't leave the instance a whole poll behind.
+          if (res.code === "network" || res.code >= 500) retrySoon();
         }
       })
-      .catch((e) => logRateLimited("fetch:throw", "bundle fetch failed", e))
+      .catch((e) => {
+        logRateLimited("fetch:throw", "bundle fetch failed", e);
+        retrySoon();
+      })
       .finally(() => {
-        inflight = null;
+        if (inflight === p) inflight = null;
       });
-    return inflight;
+    inflight = p;
+    inflightAt = now();
+    return p;
   }
 
   if (opts.initialToken) load(opts.initialToken);
@@ -108,7 +138,7 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
         current = null; // expired → control until a fresh bundle arrives
         currentToken = null;
       }
-      if (opts.fetcher && !inflight && now() >= nextCheck) {
+      if (opts.fetcher && !live() && now() >= nextCheck) {
         const p = refresh();
         waitUntil?.(p);
       }
