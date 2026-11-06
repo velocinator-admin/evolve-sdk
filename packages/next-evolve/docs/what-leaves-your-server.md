@@ -33,7 +33,7 @@ The collect route turns each page load's LCP, CLS and INP into a count in a fixe
 
 ### Page fetch for AI suggestions (`EvolveBot`)
 
-When you ask the cloud to suggest variants for a region, it may fetch the public page that region lives on, at most once per page per day, to read its visible text. It's an anonymous `GET` (no cookies, no key, no redirects followed, 5 s timeout, at most 1 MB) to your site's domain, with the user agent `EvolveBot/1.0 (+https://evolveab.com/bot)`. The SDK treats that user agent as a bot, so your site serves it control, sets no cookie and records nothing. It sees exactly what any anonymous visitor sees. Only the page's text (at most 4,000 characters) is kept, to write better suggestions.
+When you ask the cloud to suggest variants for a region, it may fetch the public page that region lives on, to read its visible text. The text is cached per page for 24 hours (and until your manifest changes), so that's about once per page per day; a failed fetch isn't cached and is tried again on the next suggestion. It's an anonymous `GET` (no cookies, no key, no redirects followed, 5 s timeout, at most 1 MB) to your site's domain, with the user agent `EvolveBot/1.0 (+https://evolveab.com/bot)`. The SDK treats that user agent as a bot, so your site serves it control, sets no cookie and records nothing. It sees exactly what any anonymous visitor sees. Only the page's text (at most 4,000 characters) is kept, to write better suggestions.
 
 **Never sent:** visitor ids (`evolve_id`), your user ids, IP addresses, user agents, event props, page-view paths, individual events or timestamps. The cloud's database has no column for them, and a test fails if one is added.
 

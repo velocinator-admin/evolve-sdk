@@ -24,6 +24,19 @@ function optimizable<P, S extends z.ZodObject>(
 
 Marks a component as optimizable. `schema` is a Zod 4 object listing the props Evolve may change. Every schema key must be a prop the component accepts, with a compatible type, or it fails to compile. Constraints (`min`, `max`, `enum`, `url()`…) become the dashboard's form validation. `.meta({ label: "Headline" })` labels a field. Returns a thin wrapper; your component isn't modified.
 
+**Locking a prop.** `.meta({ locked: true })` keeps a field at the value in your code: the dashboard refuses to change it ("locked in code"), and AI suggestions never see or change it (it is left out of the schema the model gets, and every proposal is checked again after merging). Use it for legal copy, prices, product names or anything you don't want tested:
+
+```ts
+const heroSchema = z.object({
+  title: z.string().min(3).max(60).meta({ label: "Headline" }),
+  disclaimer: z.string().meta({ label: "Disclaimer", locked: true }),
+});
+```
+
+The AI also never writes links or images: `url()` fields and string fields named like links (`href`, `url`, `src`, `link`, `path`, `image`, `img`, `to`, or ending in `Href`, `Url`, `Src`, `Link`, `Path`, `Image`…) are left out of its schema, and a proposal whose copy contains a link, an e-mail address or a domain is rejected (unless control's copy already shows it). If a region has nothing left to edit, "Suggest variants" is disabled with the reason.
+
+**Render props as text.** Variant props (written by people or the AI) arrive as plain strings and React escapes them when you render them as children or attributes. Don't pass an optimizable prop into `dangerouslySetInnerHTML` (or any other raw-HTML sink such as `innerHTML` in an effect): that would turn a variant's copy into markup on your page.
+
 ### `<Optimizable id component props />`
 
 ```tsx
