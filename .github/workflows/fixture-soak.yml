@@ -1,0 +1,123 @@
+# T19.7 autopilot soak (cloud docs/reliability/phase-2-soak.md): simulated
+# visitors against the production fixture, a few times a day, slow enough to
+# stay under Vercel's DDoS challenge (each run comes from a fresh runner IP).
+# No secrets: the simulator only talks to the fixture's public pages and its
+# beacon endpoint, like a browser.
+#
+# Scheduled runs are off unless repo variable SOAK_ON is `on`; they read their
+# settings from SOAK_* repo variables. A manual run takes inputs, and an empty
+# input falls back to the variable, then to the default here.
+#
+# Arms not named in `rates` / `guardrail_rates` (i.e. the AI arms autopilot
+# adds) get the default `rate` / `guardrail_rate`. On the UTC date in
+# SOAK_GUARDRAIL_LOSS_ON, scheduled runs use SOAK_GUARDRAIL_LOSS_RATE as that
+# default instead, so the AI arms lose the guardrail (a guardrail rollback).
+name: Fixture soak
+
+on:
+  schedule:
+    - cron: "7 0,6,12,18 * * *"
+  workflow_dispatch:
+    inputs:
+      visitors:
+        description: Visitors this run (default 500)
+        required: false
+      rps:
+        description: Max requests per second, all requests together (default 0.25)
+        required: false
+      path:
+        description: Page the visitors land on (default /pricing)
+        required: false
+      goal:
+        description: Primary goal's event (default pricing_cta)
+        required: false
+      rate:
+        description: Primary rate for arms not listed in `rates`
+        required: false
+      rates:
+        description: "Per-arm primary rates, space-separated `variant=rate`"
+        required: false
+      guardrail:
+        description: Guardrail goal's event (empty = none)
+        required: false
+      guardrail_rate:
+        description: Guardrail rate for arms not listed in `guardrail_rates`
+        required: false
+      guardrail_rates:
+        description: "Per-arm guardrail rates, space-separated `variant=rate`"
+        required: false
+      url:
+        description: Fixture URL (default https://fixture.evolveab.com)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-soak
+  cancel-in-progress: false
+
+jobs:
+  simulate:
+    if: github.event_name == 'workflow_dispatch' || vars.SOAK_ON == 'on'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: apps/fixture/scripts
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Simulate visitors
+        env:
+          EVENT: ${{ github.event_name }}
+          VISITORS: ${{ inputs.visitors || vars.SOAK_VISITORS || '500' }}
+          RPS: ${{ inputs.rps || vars.SOAK_RPS || '0.25' }}
+          PAGE: ${{ inputs.path || vars.SOAK_PATH || '/pricing' }}
+          GOAL: ${{ inputs.goal || vars.SOAK_GOAL || 'pricing_cta' }}
+          RATE: ${{ inputs.rate || vars.SOAK_RATE || '0.2' }}
+          RATES: ${{ inputs.rates || vars.SOAK_RATES || '' }}
+          GUARDRAIL: ${{ inputs.guardrail || vars.SOAK_GUARDRAIL || '' }}
+          GUARDRAIL_RATE: ${{ inputs.guardrail_rate || vars.SOAK_GUARDRAIL_RATE || '0.3' }}
+          GUARDRAIL_RATES: ${{ inputs.guardrail_rates || vars.SOAK_GUARDRAIL_RATES || '' }}
+          LOSS_ON: ${{ vars.SOAK_GUARDRAIL_LOSS_ON || '' }}
+          LOSS_RATE: ${{ vars.SOAK_GUARDRAIL_LOSS_RATE || '0.03' }}
+          URL: ${{ inputs.url || vars.SOAK_URL || 'https://fixture.evolveab.com' }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "schedule" ] && [ -n "$GUARDRAIL" ] && [ "$LOSS_ON" = "$(date -u +%F)" ]; then
+            GUARDRAIL_RATE="$LOSS_RATE"
+            echo "::notice::Guardrail-loss day: unlisted arms send $GUARDRAIL at $LOSS_RATE"
+          fi
+          args=(--url "$URL" --path "$PAGE" --visitors "$VISITORS" --rps "$RPS"
+            --goal "$GOAL" --rate "$RATE" --concurrency 2 --stop-after-errors 20)
+          for r in $RATES; do args+=(--rate "$r"); done
+          if [ -n "$GUARDRAIL" ]; then
+            args+=(--guardrail "$GUARDRAIL" --guardrail-rate "$GUARDRAIL_RATE")
+            for r in $GUARDRAIL_RATES; do args+=(--guardrail-rate "$r"); done
+          fi
+          echo "simulate ${args[*]}"
+          set +e
+          node --experimental-strip-types --no-warnings apps/fixture/scripts/simulate.ts "${args[@]}" > result.json
+          set -e
+          cat result.json
+          {
+            echo "### Fixture soak: $(date -u '+%F %H:%M') UTC"
+            echo
+            echo '```'
+            echo "simulate ${args[*]}"
+            echo '```'
+            echo
+            echo '```json'
+            cat result.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Fail on a stopped run (e.g. a bot challenge) or > 5% errors.
+          node -e '
+            const r = require("./result.json");
+            const total = r.visitors + r.errors;
+            if (r.stopped || (total && r.errors / total > 0.05)) {
+              console.log(`::error::${r.errors} errors of ${total}${r.stopped ? ", stopped" : ""}: ${JSON.stringify(r.errorReasons)}`);
+              process.exit(1);
+            }'

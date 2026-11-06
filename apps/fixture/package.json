@@ -10,7 +10,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test:e2e": "playwright test",
     "check:server-only": "node test/check-server-only.mjs",
-    "perf": "node --experimental-strip-types --no-warnings scripts/perf.ts"
+    "perf": "node --experimental-strip-types --no-warnings scripts/perf.ts",
+    "test": "vitest run scripts"
   },
   "dependencies": {
     "next": "16.4.3",

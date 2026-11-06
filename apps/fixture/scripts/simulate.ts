@@ -12,6 +12,13 @@
 // reports an LCP per page view (log-normal around the arm's median, ms), each
 // view one beacon batch with the page's `exp` pairs and a `cwv` event, as the
 // browser beacon sends at pagehide. Without `--lcp` nothing changes.
+//
+// Soak (T19.7, run from GitHub Actions against the production fixture):
+// `--rps 0.25` paces every request (page, collect, track) to stay under the
+// host's bot/DDoS challenge; `--guardrail cta_click --guardrail-rate 0.3
+// --guardrail-rate <var>=0.02` also sends a guardrail event with its own
+// per-arm rate (one independent draw per visitor); `--stop-after-errors 20`
+// stops a run that's being challenged instead of hammering it.
 
 export type SimulateOptions = {
   /** Fixture base URL, e.g. http://localhost:3100. */
@@ -38,6 +45,15 @@ export type SimulateOptions = {
   lcps?: Record<string, number>;
   /** Page views per visitor (each a beacon batch with vitals; default 1). */
   views?: number;
+  /** At most this many requests per second, all workers together (default: no limit). */
+  rps?: number;
+  /** A second event per visitor (e.g. a guardrail goal's event), with its own rates. */
+  guardrail?: string;
+  guardrailRate?: number;
+  /** Per-arm guardrail rates, keyed `exp:variant` (or just `variant`). */
+  guardrailRates?: Record<string, number>;
+  /** Stop the run after this many errors in a row (default: never). */
+  stopAfterErrors?: number;
   /** Also return each visitor's anon id per arm (tests). */
   keepIds?: boolean;
   fetch?: typeof fetch;
@@ -45,11 +61,13 @@ export type SimulateOptions = {
 
 export type SimulateResult = {
   visitors: number;
-  /** Per `exp:variant`: visitors exposed and conversions sent. */
-  arms: Record<string, { n: number; c: number }>;
+  /** Per `exp:variant`: visitors exposed, conversions sent and (with `guardrail`) guardrail events. */
+  arms: Record<string, { n: number; c: number; g?: number }>;
   errors: number;
   /** Error messages and how often each happened (e.g. a host's bot challenge: "page 403 …"). */
   errorReasons?: Record<string, number>;
+  /** True when `stopAfterErrors` ended the run early. */
+  stopped?: boolean;
   /** With `keepIds`: anon ids per `exp:variant`, and the ones that converted. */
   ids?: Record<string, { all: string[]; converted: string[] }>;
 };
@@ -85,8 +103,22 @@ function cookiesFrom(res: Response): Map<string, string> {
   return out;
 }
 
+/** Spaces calls at least 1/rps seconds apart, across concurrent callers. */
+function paced(f: typeof fetch, rps: number | undefined): typeof fetch {
+  if (!rps || rps <= 0) return f;
+  const gap = 1000 / rps;
+  let next = 0;
+  return (async (...args: Parameters<typeof fetch>) => {
+    const now = Date.now();
+    const at = Math.max(now, next);
+    next = at + gap;
+    if (at > now) await new Promise((r) => setTimeout(r, at - now));
+    return f(...args);
+  }) as typeof fetch;
+}
+
 export async function simulate(o: SimulateOptions): Promise<SimulateResult> {
-  const f = o.fetch ?? fetch;
+  const f = paced(o.fetch ?? fetch, o.rps);
   const base = o.url.replace(/\/$/, "");
   const path = o.path ?? "/";
   const random = prng(o.seed ?? Date.now());
@@ -139,12 +171,22 @@ export async function simulate(o: SimulateOptions): Promise<SimulateResult> {
     const u = random();
     const [first] = assigned;
     const converts = first ? u < rateFor(first[0], first[1]) : u < o.rate;
+    const guardrailFor = (exp: string, variant: string) =>
+      o.guardrailRates?.[`${exp}:${variant}`] ??
+      o.guardrailRates?.[variant] ??
+      o.guardrailRate ??
+      0;
+    // Drawn only with --guardrail, so seeded runs without it are unchanged.
+    const guards = o.guardrail
+      ? random() < (first ? guardrailFor(first[0], first[1]) : (o.guardrailRate ?? 0))
+      : false;
     for (const [e, v] of assigned) {
       const key = `${e}:${v}`;
-      result.arms[key] ??= { n: 0, c: 0 };
+      result.arms[key] ??= o.guardrail ? { n: 0, c: 0, g: 0 } : { n: 0, c: 0 };
       const arm = result.arms[key];
       arm.n++;
       if (converts) arm.c++;
+      if (guards) arm.g!++;
       if (o.keepIds) {
         result.ids ??= {};
         result.ids[key] ??= { all: [], converted: [] };
@@ -154,6 +196,7 @@ export async function simulate(o: SimulateOptions): Promise<SimulateResult> {
       }
     }
     result.visitors++;
+    if (guards) await collect([{ t: "ev", n: o.guardrail, p: path }]);
     if (!converts) return;
     if (o.trackSecret && random() < (o.serverShare ?? 0)) {
       const r = await f(`${base}/api/evolve/track`, {
@@ -169,13 +212,17 @@ export async function simulate(o: SimulateOptions): Promise<SimulateResult> {
   };
 
   let next = 0;
+  let inARow = 0;
   const worker = async () => {
-    while (next < o.visitors) {
+    while (next < o.visitors && !result.stopped) {
       next++;
       try {
         await visit();
+        inARow = 0;
       } catch (e) {
         result.errors++;
+        inARow++;
+        if (o.stopAfterErrors && inARow >= o.stopAfterErrors) result.stopped = true;
         const why = e instanceof Error ? e.message : String(e);
         result.errorReasons ??= {};
         result.errorReasons[why] = (result.errorReasons[why] ?? 0) + 1;
@@ -186,7 +233,7 @@ export async function simulate(o: SimulateOptions): Promise<SimulateResult> {
   return result;
 }
 
-function parseArgs(argv: string[]): SimulateOptions {
+export function parseArgs(argv: string[]): SimulateOptions {
   const o: SimulateOptions = {
     url: "http://localhost:3100",
     visitors: 1000,
@@ -195,6 +242,7 @@ function parseArgs(argv: string[]): SimulateOptions {
   };
   const rates: Record<string, number> = {};
   const lcps: Record<string, number> = {};
+  const guardrailRates: Record<string, number> = {};
   for (let i = 0; i < argv.length; i++) {
     const [flag, value] = [argv[i], argv[i + 1] ?? ""];
     i++;
@@ -223,6 +271,21 @@ function parseArgs(argv: string[]): SimulateOptions {
         else lcps[value.slice(0, eq)] = Number(value.slice(eq + 1));
         break;
       }
+      case "--rps":
+        o.rps = Number(value);
+        break;
+      case "--guardrail":
+        o.guardrail = value;
+        break;
+      case "--guardrail-rate": {
+        const eq = value.lastIndexOf("=");
+        if (eq < 0) o.guardrailRate = Number(value);
+        else guardrailRates[value.slice(0, eq)] = Number(value.slice(eq + 1));
+        break;
+      }
+      case "--stop-after-errors":
+        o.stopAfterErrors = Number(value);
+        break;
       case "--views":
         o.views = Number(value);
         break;
@@ -244,6 +307,7 @@ function parseArgs(argv: string[]): SimulateOptions {
   }
   o.rates = rates;
   if (Object.keys(lcps).length) o.lcps = lcps;
+  if (Object.keys(guardrailRates).length) o.guardrailRates = guardrailRates;
   return o;
 }
 
