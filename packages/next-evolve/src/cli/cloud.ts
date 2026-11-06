@@ -42,7 +42,9 @@ async function call(
         error:
           res.status === 401
             ? "the secret key was rejected (check EVOLVE_SECRET_KEY)"
-            : `HTTP ${res.status}${err.message ? `: ${err.message}` : err.error ? `: ${err.error}` : ""}`,
+            : res.status === 410 && err.error === "site_deleted"
+              ? "this site was deleted in Evolve Cloud"
+              : `HTTP ${res.status}${err.message ? `: ${err.message}` : err.error ? `: ${err.error}` : ""}`,
       };
     }
     return { ok: true, status: res.status, json };

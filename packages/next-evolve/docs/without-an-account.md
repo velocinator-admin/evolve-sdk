@@ -19,9 +19,13 @@ Removing Evolve is the same as never having added it: delete the `<Optimizable>`
 - **Up to 14 days:** the app serves the last bundle it verified. Experiments keep running with their last weights, events keep being written to your database, and the next aggregate after the outage counts them.
 - **After 14 days** (the bundle's expiry): control for everyone, no new cookies. Events from visitors who already have an `evolve_id` cookie, and server events (`evolve.track`, `/api/evolve/track`), are still written; new visitors aren't recorded.
 
-## The key is revoked or the site deleted
+## The site is deleted
 
-The cloud answers `401`, which the SDK treats like an outage: the last bundle serves until it expires (at most 14 days), then control. There's no instant kill switch; to stop an experiment at once, pause it in the dashboard.
+Deleting a site in the dashboard publishes an empty bundle first, so apps that fetch it serve control within one poll (or at once, through the sync webhook). After the site's data is purged (a day later), the cloud answers every request for that site's keys with `410 {"error":"site_deleted"}`. The SDK treats that one answer as final: it drops its cached bundle and serves control right away, refuses the old bundle from the build bundle, disk cache or Global Config, and `next-evolve pull` writes an empty build bundle. Only a newer signed bundle from the cloud would end it.
+
+## The key is revoked
+
+The cloud answers `401`, which the SDK treats like an outage: the last bundle serves until it expires (at most 14 days), then control. That's on purpose: a `401` also happens during key rotation (the old key revoked before the new one is deployed) or in a preview environment with the wrong key, and neither should switch production to control. Only `410 site_deleted` does. There's no instant kill switch; to stop an experiment at once, pause it in the dashboard.
 
 ## Your database is missing or down
 

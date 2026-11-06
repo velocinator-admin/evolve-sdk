@@ -141,6 +141,10 @@ export type FakeCloud = {
   preview(input: { site?: string; code: string; exp?: number }): string;
   /** Sites whose bearer requests get their connection dropped (cloud unreachable). */
   down: Set<string>;
+  /** Deleted sites (PRIV-1): every bearer request gets 410 `{"error":"site_deleted"}`. */
+  deleted: Set<string>;
+  /** Sites whose key is rejected (revoked key, rotation): every bearer request gets 401 `invalid_key`. */
+  rejected: Set<string>;
   /** Signs and POSTs a sync webhook to `<appUrl>/api/evolve/sync`; never throws. */
   webhook(appUrl: string, input?: WebhookInput): Promise<WebhookExchange>;
   webhooks: WebhookExchange[];
@@ -163,6 +167,7 @@ type Stored = { token: string; payload: BundlePayload };
  *   request to the app
  * - `POST /__control/preview` ({ site?, code, exp? }) → { token }: a signed preview token
  * - `POST /__control/outage` ({ site?, down }) → that site's bearer requests drop the connection
+ * - `POST /__control/site` ({ site?, deleted?, rejected? }) → 410 site_deleted / 401 invalid_key for that site
  * - `POST /__control/aggregate-request` ({ site?, request }) → what `/v1/aggregates/request` returns
  * - `POST /v1/aggregates/request`, `POST /v1/aggregates` (CLI: fetch a request, upload its signed response)
  * - `GET /v1/aggregate-requests` (pull mode: leases queued requests, signed like a push)
@@ -180,6 +185,8 @@ export async function startFakeCloud(
   } = {},
 ): Promise<FakeCloud> {
   const down = new Set(opts.downSites ?? []);
+  const deleted = new Set<string>();
+  const rejected = new Set<string>();
   const key = opts.key ?? TEST_KEY;
   const secrets: Record<string, string> = {
     [TEST_SITE]: TEST_WEBHOOK_SECRET,
@@ -356,6 +363,10 @@ export async function startFakeCloud(
     if (site && down.has(site)) {
       req.socket.destroy();
       return;
+    }
+    if (site && url.pathname.startsWith("/v1/")) {
+      if (deleted.has(site)) return send(410, { error: "site_deleted" });
+      if (rejected.has(site)) return send(401, { error: "invalid_key" });
     }
 
     if (
@@ -552,6 +563,22 @@ export async function startFakeCloud(
       }
     }
 
+    if (req.method === "POST" && url.pathname === "/__control/site") {
+      try {
+        const b = JSON.parse(await readBody(req)) as {
+          site?: string;
+          deleted?: boolean;
+          rejected?: boolean;
+        };
+        const s = b.site ?? TEST_SITE;
+        if (b.deleted !== undefined) b.deleted ? deleted.add(s) : deleted.delete(s);
+        if (b.rejected !== undefined) b.rejected ? rejected.add(s) : rejected.delete(s);
+        return send(200, { deleted: [...deleted], rejected: [...rejected] });
+      } catch (e) {
+        return send(400, { error: String(e) });
+      }
+    }
+
     if (req.method === "POST" && url.pathname === "/__control/outage") {
       try {
         const b = JSON.parse(await readBody(req)) as { site?: string; down: boolean };
@@ -608,6 +635,8 @@ export async function startFakeCloud(
     pulled,
     preview,
     down,
+    deleted,
+    rejected,
     webhook,
     webhooks,
     appUrls,

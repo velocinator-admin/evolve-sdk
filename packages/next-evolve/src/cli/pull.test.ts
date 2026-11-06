@@ -71,6 +71,23 @@ describe("next-evolve pull (build-time bundle)", () => {
     expect(readBuildBundle(down.file)).toBe(readBuildBundle(ok.file));
   });
 
+  it("a deleted site (410 site_deleted) writes null even over a valid previous bundle; a 401 keeps it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "evolve-pull-"));
+    cloud.publish({ site: TEST_SITE, ...content });
+    const ok = await run(dir, env());
+    expect(readBuildBundle(ok.file)).not.toBeNull();
+    cloud.rejected.add(TEST_SITE);
+    const rejected = await run(dir, env());
+    cloud.rejected.delete(TEST_SITE);
+    expect(readBuildBundle(rejected.file)).toBe(readBuildBundle(ok.file));
+    cloud.deleted.add(TEST_SITE);
+    const gone = await run(dir, env());
+    cloud.deleted.delete(TEST_SITE);
+    expect(gone.code).toBe(0);
+    expect(readBuildBundle(gone.file)).toBeNull();
+    expect(gone.lines.join("\n")).toMatch(/deleted/);
+  });
+
   it("refuses a bundle that doesn't verify (wrong key) and writes null", async () => {
     const dir = mkdtempSync(join(tmpdir(), "evolve-pull-"));
     cloud.publish({ site: TEST_SITE, ...content });

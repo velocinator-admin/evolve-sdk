@@ -78,3 +78,34 @@ describe("Node chain: disk cache (spec §7.8)", () => {
     expect(isLongRunningNode({})).toBe(true);
   });
 });
+
+describe("deleted site over HTTP (PRIV-1)", () => {
+  it("a 401 (e.g. a revoked key during rotation) keeps serving the bundle; 410 site_deleted → control, even after a restart from disk", async () => {
+    const { token, payload } = publish();
+    const store = getBundleStore({ pollSeconds: 60 }, { env: env(), diskDir: dir })!;
+    await store.refresh();
+    expect(store.current()?.ver).toBe(payload.ver);
+
+    cloud.rejected.add(TEST_SITE);
+    for (let i = 0; i < 3; i++) await store.refresh();
+    expect(store.peek()?.ver).toBe(payload.ver);
+    cloud.rejected.delete(TEST_SITE);
+
+    cloud.deleted.add(TEST_SITE);
+    try {
+      await store.refresh();
+      expect(store.peek()).toBeNull();
+
+      resetBundleStores(); // restart: build bundle and disk still hold the old bundle
+      const after = getBundleStore(
+        { pollSeconds: 60 },
+        { env: env(), diskDir: dir, buildBundle: token },
+      )!;
+      await after.refresh();
+      expect(after.peek()).toBeNull();
+      expect(after.load(token)).toBe(false);
+    } finally {
+      cloud.deleted.delete(TEST_SITE);
+    }
+  });
+});
