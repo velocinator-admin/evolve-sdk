@@ -15,7 +15,8 @@ export default defineConfig({
   store: "auto",
   sync: { pollSeconds: 60 }, // 5 in development
   database: { urlEnv: "EVOLVE_DATABASE_URL" },
-  aggregate: { maxMs: 25_000, statementTimeoutMs: 20_000 },
+  aggregate: { maxMs: 25_000, statementTimeoutMs: 20_000, mode: "push" }, // mode since 0.7
+  retentionDays: undefined, // keep everything; or e.g. 180 (since 0.7)
   cookies: { maxAgeDays: 365, domain: undefined },
   consent: undefined, // (req: Request) => boolean
   bots: { extraPatterns: [] },
@@ -32,6 +33,8 @@ export default defineConfig({
 | `database.urlEnv`              | Which env var holds the database URL                                                                                                                                                                                                                                                                                                                                                          |
 | `aggregate.maxMs`              | Time budget for one aggregate request; past it the response is partial and the cloud asks again                                                                                                                                                                                                                                                                                               |
 | `aggregate.statementTimeoutMs` | Postgres `statement_timeout` per aggregation query                                                                                                                                                                                                                                                                                                                                            |
+| `aggregate.mode`               | `"push"` (default): the cloud calls `POST /api/evolve/aggregate`. `"pull"` (since 0.7): the app polls the cloud every 60 s and posts results back, for servers the cloud can't reach. Pull needs a long-running Node server (`next start`, Docker) and `registerEvolve()`. See [Going to production](production.md#pull-mode-servers-the-cloud-cant-reach)                                    |
+| `retentionDays`                | Since 0.7. Delete local rows older than this many days (30 to 3650), once a day, from inside aggregate requests. Unset (default): nothing is deleted. See [Retention](#retention-retentiondays)                                                                                                                                                                                               |
 | `cookies.maxAgeDays`           | Lifetime of `evolve_id` and `evolve_a`                                                                                                                                                                                                                                                                                                                                                        |
 | `cookies.domain`               | Set to `.example.com` to share assignments across subdomains                                                                                                                                                                                                                                                                                                                                  |
 | `consent`                      | Return `false` to serve control and set no cookies (e.g. before cookie consent)                                                                                                                                                                                                                                                                                                               |
@@ -118,4 +121,16 @@ What stays the same:
 
 ## Database
 
-`next-evolve migrate` creates a schema named `evolve` with these tables: `exposures` (one row per visitor per experiment), `events`, `identities`, `usage_daily` (tested page views per day), `vitals_daily` (Core Web Vitals histograms: counts per experiment, variant, metric, day and bin, no visitor id; since 0.5), `aggregate_runs` (the last 24 h of aggregate responses, for retries) and `migrations`. Your own tables aren't touched. Rows are kept until you delete them.
+`next-evolve migrate` creates a schema named `evolve` with these tables: `exposures` (one row per visitor per experiment), `events`, `identities`, `usage_daily` (tested page views per day), `vitals_daily` (Core Web Vitals histograms: counts per experiment, variant, metric, day and bin, no visitor id; since 0.5), `aggregate_runs` (the last 24 h of aggregate responses, for retries), `experiment_activity` and `cleanup_runs` (for `retentionDays`; since 0.7) and `migrations`. Your own tables aren't touched. Rows are kept until you delete them, or until `retentionDays` does.
+
+### Retention (`retentionDays`)
+
+With `retentionDays: 180` (minimum 30) the SDK deletes old rows once a day. There's no cron to set up: the cleanup runs inside the cloud's aggregate requests (push or pull mode), after the aggregation and within its time budget (at most 10 s per request). Deletes go in batches of 5,000 rows with a 5 s statement timeout, so they never lock `evolve.events`; a day's cleanup that runs out of time is finished by the next request.
+
+What's deleted:
+
+- `events` whose time **and** arrival are older than the cutoff;
+- `exposures` older than `retentionDays` of experiments the cloud no longer aggregates (stopped or archived);
+- `vitals_daily` days older than the cutoff.
+
+The cutoff is `retentionDays` ago, **or earlier if a running or paused experiment needs it**: everything from one day before the earliest exposure of any experiment the cloud still asks about is kept, because its daily full recount re-reads from its start (goal windows and the 7-day guardrail windows included). Exposures of running and paused experiments, `identities` and `usage_daily` are never deleted. The SDK learns which experiments are active from the aggregate requests themselves (`evolve.experiment_activity`), and deletes nothing until it has tracked them for 26 hours (one daily full recount). Needs `npx next-evolve migrate` (0003); without it the cleanup is skipped with a warning. `evolve.cleanup_runs` records what each day deleted.

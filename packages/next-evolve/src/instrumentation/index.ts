@@ -1,14 +1,17 @@
-import { buildManifest, detectAppUrl } from "../cloud/manifest";
+import { type PullLoop, startAggregatePull } from "../aggregate/pull";
+import { buildManifest, detectAppUrl, sdkVersion } from "../cloud/manifest";
 import { pushToCloud } from "../cloud/push";
 import { type EvolveConfig, resolveConfig } from "../config/config";
 import type { Goals } from "../config/goals";
+import { getSql } from "../db/client";
 import { setRuntime } from "../server/runtime";
-import { getBundleStore, isLongRunningNode } from "../store/runtime";
+import { DEFAULT_CLOUD_URL, getBundleStore, isLongRunningNode } from "../store/runtime";
 
 export type RegisterEvolveOptions = { config: EvolveConfig; goals?: Goals };
 
 let registered = false;
 let poll: ReturnType<typeof setInterval> | null = null;
+let pull: PullLoop | null = null;
 
 /**
  * Call from `instrumentation.ts` `register()`:
@@ -24,7 +27,8 @@ let poll: ReturnType<typeof setInterval> | null = null;
  * (goals, routes, versions, app URL; spec §8.4), once per process, in the
  * background (it resolves without waiting for the cloud). On
  * long-running Node it also polls the bundle in the background (spec §7.5),
- * so the disk cache stays fresh between requests. Never throws.
+ * so the disk cache stays fresh between requests. With `aggregate.mode: "pull"`
+ * it polls the cloud for aggregate requests every 60 s (AGG-2). Never throws.
  */
 export async function registerEvolve(opts: RegisterEvolveOptions): Promise<void> {
   if (registered) return;
@@ -40,6 +44,7 @@ export async function registerEvolve(opts: RegisterEvolveOptions): Promise<void>
         poll.unref();
       }
     }
+    startPull(opts.config);
     // Not awaited: Next awaits register() before an instance serves its first
     // request, so awaiting the push would put a network call to the cloud (up
     // to its 3 s timeout) in front of every cold instance's first request.
@@ -52,6 +57,31 @@ export async function registerEvolve(opts: RegisterEvolveOptions): Promise<void>
   } catch (e) {
     console.error("[evolve] registerEvolve failed", e);
   }
+}
+
+/** Pull mode: only on long-running Node, with a key, a webhook secret and a cloud URL. */
+function startPull(config: EvolveConfig, env: Record<string, string | undefined> = process.env) {
+  const cfg = resolveConfig(config);
+  if (cfg.aggregate.mode !== "pull") return;
+  if (!isLongRunningNode(env)) {
+    console.warn(
+      '[evolve] aggregate.mode "pull" needs a long-running Node server; on serverless use push',
+    );
+    return;
+  }
+  const cloudUrl = env.EVOLVE_CLOUD_URL ?? DEFAULT_CLOUD_URL;
+  if (!cloudUrl || !env.EVOLVE_SECRET_KEY || !env.EVOLVE_WEBHOOK_SECRET) {
+    console.warn("[evolve] aggregate pull needs EVOLVE_SECRET_KEY and EVOLVE_WEBHOOK_SECRET");
+    return;
+  }
+  pull = startAggregatePull({
+    config: cfg,
+    env,
+    cloudUrl,
+    sql: () => getSql(cfg.databaseUrlEnv, env),
+    sdkVersion: sdkVersion(),
+    log: (m) => console.error(m),
+  });
 }
 
 let manifestPush: Promise<void> | null = null;
@@ -67,4 +97,6 @@ export function resetRegisterEvolve(): void {
   manifestPush = null;
   if (poll) clearInterval(poll);
   poll = null;
+  pull?.stop();
+  pull = null;
 }

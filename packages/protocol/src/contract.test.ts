@@ -6,6 +6,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { aggregateRequestSchema, aggregateResponseSchema } from "./aggregate";
 import { bundlePayloadSchema, computeBundleHash } from "./bundle";
+import { aggregatePullSchema } from "./pull";
 import { syncWebhookSchema } from "./sync";
 import { SUPPORTED_PROTOCOLS } from "./version";
 
@@ -17,6 +18,7 @@ const schemas = {
   "aggregate-response": aggregateResponseSchema,
   "aggregate-request-vitals": aggregateRequestSchema,
   "aggregate-response-vitals": aggregateResponseSchema,
+  "aggregate-pull": aggregatePullSchema,
 } as const;
 
 for (const pv of SUPPORTED_PROTOCOLS) {

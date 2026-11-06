@@ -1,0 +1,10 @@
+{
+  "pv": 1,
+  "requests": [
+    {
+      "delivery": "6f9c1a52-3b7e-4d21-9a0c-5e8b2f4d7c11",
+      "signature": "t=1795000000,v1=cc832e256ea5ec76c48429d48a9dffc7dae70375ccfb01697a3d9db5a72aa058",
+      "body": "{\"type\":\"aggregate.request\",\"pv\":1,\"requestId\":\"agr_7f3kq9w2m4x8z1c5v6b7n0aa\",\"site\":\"site_ab12cd34ef\",\"asOf\":\"2026-12-01T10:00:00Z\",\"mode\":\"incremental\",\"experiments\":[{\"id\":\"k3j9x2\",\"variants\":[\"a8f2l1\",\"c1d2e3\",\"f4g5h6\"],\"cohortsFrom\":\"2026-11-20\",\"goals\":[{\"key\":\"signed_up\",\"role\":\"primary\",\"hash\":\"3f1a\",\"def\":{\"kind\":\"event\",\"event\":\"signed_up\",\"window\":\"7d\",\"unit\":\"visitor\",\"source\":null,\"where\":null,\"value\":null,\"direction\":\"increase\"}},{\"key\":\"paid\",\"role\":\"secondary\",\"hash\":\"9b2c\",\"def\":{\"kind\":\"event\",\"event\":\"subscription_started\",\"window\":\"30d\",\"unit\":\"visitor\",\"source\":\"stripe\",\"where\":null,\"value\":{\"kind\":\"local-fn\"},\"direction\":\"increase\"}},{\"key\":\"signup_page\",\"role\":\"secondary\",\"hash\":\"77de\",\"def\":{\"kind\":\"pageview\",\"path\":\"/signup\",\"window\":\"1d\",\"unit\":\"visitor\",\"value\":null,\"direction\":\"increase\"}}]}],\"usageFrom\":\"2026-11-30\"}"
+    }
+  ]
+}

@@ -149,6 +149,10 @@ npx next-evolve doctor
 
 More in [docs/production.md](docs/production.md).
 
+**Server the cloud can't reach?** On `next start` or Docker, set `aggregate: { mode: "pull" }` in `evolve.config.ts`: the app polls the cloud every 60 s and posts the signed results back, so only outbound HTTPS is needed ([pull mode](docs/production.md#pull-mode-servers-the-cloud-cant-reach)).
+
+**Keep the events table small.** Set `retentionDays: 180` (minimum 30) and the SDK deletes old local rows once a day, from inside aggregate requests, in small batches. It never deletes data a running or paused experiment still needs. Unset, nothing is deleted ([retention](docs/configuration.md#retention-retentiondays)).
+
 ## Docs
 
 - [Concepts](docs/concepts.md): regions, variants, experiments, the bundle, static vs dynamic mode, cookies, bots
