@@ -8,7 +8,7 @@ import { type EvolveConfig, normalizePath, resolveConfig } from "../config/confi
 import { trustedKeys } from "../core/keys";
 import { createSql } from "../db/client";
 import { loadMigrations } from "../db/migrate";
-import { fetchBundle } from "../store/fetch";
+import { fetchBundle, isSiteDeleted } from "../store/fetch";
 import { cloudUrl, getSiteInfo, runCloudTest } from "./cloud";
 import { detectProject } from "./detect";
 import { fileEnv } from "./env-file";
@@ -155,7 +155,9 @@ export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
       timeoutMs: 10_000,
       fetch: deps.fetch,
     });
-    if (res.status !== "ok") checks.push(fail("Bundle", "couldn't fetch the bundle"));
+    if (isSiteDeleted(res))
+      checks.push(fail("Bundle", "this site was deleted in Evolve Cloud: the app serves control"));
+    else if (res.status !== "ok") checks.push(fail("Bundle", "couldn't fetch the bundle"));
     else {
       const v = verifyBundle(res.token, { keys: trustedKeys(env), site: parsed.siteId, now });
       const days = v.ok ? Math.floor((v.payload.exp - now) / DAY) : 0;

@@ -325,6 +325,22 @@ describe("test controls (T12.1a)", () => {
     expect(ok.status).toBe(200);
   });
 
+  it("a deleted site gets 410 site_deleted, a rejected key 401, on every /v1 route", async () => {
+    cloud.publish(content);
+    const bundle = () =>
+      fetch(`${cloud.url}/v1/bundle`, { headers: { authorization: `Bearer ${TEST_SECRET_KEY}` } });
+    const set = (b: object) =>
+      fetch(`${cloud.url}/__control/site`, { method: "POST", body: JSON.stringify(b) });
+    await set({ rejected: true });
+    expect((await bundle()).status).toBe(401);
+    await set({ rejected: false, deleted: true });
+    const gone = await bundle();
+    expect(gone.status).toBe(410);
+    expect(await gone.json()).toEqual({ error: "site_deleted" });
+    cloud.deleted.delete(TEST_SITE);
+    expect((await bundle()).status).toBe(200);
+  });
+
   it("signs preview tokens the SDK accepts", async () => {
     const { verifyPreview } = await import("@next-evolve/protocol");
     const res = await fetch(`${cloud.url}/__control/preview`, {

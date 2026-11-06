@@ -81,7 +81,8 @@ Start with `npx next-evolve doctor`. It checks the env, key, database, bundle, p
 
 ## The site serves control after working for a while
 
-- **The bundle expired.** If the app couldn't reach the cloud for 14 days, or the key was revoked or the site deleted, the last bundle expires and every visitor gets control. New visitors aren't recorded; returning visitors' events and server events still are. Fix the connection (check `EVOLVE_SECRET_KEY` and outbound access to `api.evolveab.com`); the next poll restores serving.
+- **The site was deleted.** The log says `this site was deleted in Evolve Cloud: serving control`. The cloud answered `410 site_deleted`, so the app serves control at once. Connect the app to an existing site (a new `EVOLVE_SECRET_KEY`) or remove Evolve.
+- **The bundle expired.** If the app couldn't reach the cloud for 14 days, or the key was revoked, the last bundle expires and every visitor gets control. New visitors aren't recorded; returning visitors' events and server events still are. Fix the connection (check `EVOLVE_SECRET_KEY` and outbound access to `api.evolveab.com`); the next poll restores serving.
 - `doctor` fails the bundle check when the current bundle is less than 7 days from expiry.
 
 ## Logs
@@ -92,6 +93,7 @@ The SDK logs with an `[evolve]` prefix, at most once a minute per message:
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
 | `no bundle yet (no experiment has started): serving control` | Normal for a new site                                                                            |
 | `bundle fetch failed (401)`                                  | The key is wrong or revoked                                                                      |
+| `this site was deleted in Evolve Cloud: serving control`     | The cloud answered `410 site_deleted`: control until the app gets a key for a live site          |
 | `bundle fetch failed (network)`                              | The cloud is unreachable; the last bundle keeps serving                                          |
 | `bundle rejected: …`                                         | A bundle failed verification (wrong site, bad signature, older version) and was ignored          |
 | `manifest push failed (…)`                                   | Startup couldn't send routes and goals; retried on the next start, or run `npx next-evolve push` |

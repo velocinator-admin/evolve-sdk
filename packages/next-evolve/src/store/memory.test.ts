@@ -225,3 +225,56 @@ describe("stale instances (T19.5)", () => {
     expect(s.fetcher).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("deleted site (410 site_deleted)", () => {
+  const gone: FetchBundleResult = {
+    status: "error",
+    code: 410,
+    message: '{"error":"site_deleted"}',
+  };
+
+  it("drops the cached bundle at once: control, not the 14-day cache", async () => {
+    const s = setup({ initial: token({ ver: 3 }) });
+    expect(s.store.peek()?.ver).toBe(3);
+    await s.reply(gone);
+    expect(s.store.peek()).toBeNull();
+    expect(s.store.token()).toBeNull();
+    expect(s.errors).toHaveBeenCalledWith(
+      "[evolve] this site was deleted in Evolve Cloud: serving control",
+    );
+  });
+
+  it("then rejects the old bundle from another source (build bundle, disk, Global Config)", async () => {
+    const old = token({ ver: 3 });
+    const s = setup({ initial: old });
+    s.store.peek();
+    await s.reply(gone);
+    expect(s.store.load(old)).toBe(false);
+    expect(s.store.load(token({ ver: 2 }))).toBe(false);
+    expect(s.store.peek()).toBeNull();
+  });
+
+  it("a newer signed bundle from the cloud is still accepted (the cloud is the authority)", async () => {
+    const s = setup({ initial: token({ ver: 3 }) });
+    s.store.peek();
+    await s.reply(gone);
+    s.advance(70_000);
+    s.store.peek();
+    await s.reply({ status: "ok", token: token({ ver: 4 }), etag: null });
+    expect(s.store.peek()?.ver).toBe(4);
+  });
+
+  it.each([
+    ["401 invalid_key (e.g. a revoked key during rotation)", 401, '{"error":"invalid_key"}'],
+    ["404", 404, '{"error":"not_found"}'],
+    ["410 without site_deleted", 410, "gone"],
+  ])("a %s keeps the cached bundle", async (_, code, message) => {
+    const s = setup({ initial: token({ ver: 3 }) });
+    for (let i = 0; i < 5; i++) {
+      s.store.peek();
+      await s.reply({ status: "error", code, message });
+      s.advance(70_000);
+    }
+    expect(s.store.peek()?.ver).toBe(3);
+  });
+});

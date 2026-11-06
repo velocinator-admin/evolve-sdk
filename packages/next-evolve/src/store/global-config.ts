@@ -2,7 +2,7 @@
 // writes the latest signed bundle to one item; every instance reads it (memory
 // TTL 5 s), so a publish reaches all instances in ~5 s instead of ≤ 60 s.
 // Tokens read from Global Config are verified like any other bundle.
-import type { FetchBundleResult } from "./fetch";
+import { type FetchBundleResult, isSiteDeleted } from "./fetch";
 
 type Env = Record<string, string | undefined>;
 
@@ -107,7 +107,8 @@ export function createGlobalConfigFetcher(opts: {
       const r = await opts.cloud(fromConfig ? null : etag);
       if (r.status !== "error") lastCloud = now();
       if (r.status === "ok") fromCloud = r.token;
-      else if (!fromConfig) return r;
+      // A deleted site: the item may still hold the old bundle, so the cloud wins.
+      else if (!fromConfig || isSiteDeleted(r)) return r;
     }
     const best = fromConfig && fromCloud ? newer(fromConfig, fromCloud) : (fromConfig ?? fromCloud);
     if (!best) return { status: "not_modified" };

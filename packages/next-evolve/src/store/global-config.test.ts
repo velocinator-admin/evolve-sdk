@@ -100,6 +100,22 @@ describe("Global Config fetcher", () => {
     });
     expect(await same(`"${payload.ver}.${payload.iat}"`)).toEqual({ status: "not_modified" });
   });
+
+  it("the cloud's 410 site_deleted wins over a stale Global Config item", async () => {
+    const { token } = publish();
+    const deleted = {
+      status: "error" as const,
+      code: 410,
+      message: '{"error":"site_deleted"}',
+    };
+    const f = createGlobalConfigFetcher({
+      site: TEST_SITE,
+      read: async () => token,
+      cloud: async () => deleted,
+      cloudEveryMs: 60_000,
+    });
+    expect(await f(null)).toEqual(deleted);
+  });
 });
 
 describe("Global Config store", () => {

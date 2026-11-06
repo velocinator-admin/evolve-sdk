@@ -6,6 +6,10 @@ export type FetchBundleResult =
   | { status: "not_modified" }
   | { status: "error"; code: number | "network"; message?: string };
 
+/** The cloud's answer for a deleted site (PRIV-1): 410 `{"error":"site_deleted"}`. */
+export const isSiteDeleted = (res: FetchBundleResult): boolean =>
+  res.status === "error" && res.code === 410 && (res.message ?? "").includes("site_deleted");
+
 /**
  * `GET {cloud}/v1/bundle` with the secret key and `If-None-Match` (spec §7.5).
  * Never throws. Verification is the caller's job.

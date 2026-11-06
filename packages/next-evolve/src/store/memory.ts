@@ -1,6 +1,6 @@
 import { type BundlePayload, type KeyRing, verifyBundle } from "@next-evolve/protocol";
 import { logRateLimited } from "../core/log";
-import type { FetchBundleResult } from "./fetch";
+import { type FetchBundleResult, isSiteDeleted } from "./fetch";
 
 export type BundleStore = {
   /**
@@ -73,12 +73,19 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
     nextCheck = Math.min(nextCheck, now() + Math.min(opts.pollMs, ERROR_RETRY_MS));
   };
 
+  // Deleted site (cloud said 410 site_deleted): serve control and refuse any
+  // bundle not newer than the last one accepted (stale build/disk/Global
+  // Config copies). Only a newer signed bundle ends it.
+  let deleted = false;
+  let last: { ver: number; exp: number } | null = null;
+
   let ready = false;
   function load(token: string): boolean {
+    const floor = current ?? (deleted ? last : null);
     const r = verifyBundle(token, {
       keys: opts.keys,
       site: opts.site,
-      current: current ? { ver: current.ver, exp: current.exp } : null,
+      current: floor ? { ver: floor.ver, exp: floor.exp } : null,
       now: Math.floor(now() / 1000),
     });
     if (!r.ok) {
@@ -88,6 +95,8 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
     }
     current = r.payload;
     currentToken = token;
+    last = { ver: r.payload.ver, exp: r.payload.exp };
+    deleted = false;
     etag = `"${r.payload.ver}.${r.payload.iat}"`;
     if (ready) opts.onAccept?.(token);
     return true;
@@ -102,7 +111,23 @@ export function createMemoryStore(opts: MemoryStoreOptions): BundleStore {
     const p: Promise<void> = (o.cloud ? f(etag, { cloud: true }) : f(etag))
       .then((res) => {
         if (res.status === "ok") load(res.token);
-        else if (res.status === "error" && res.code === 404 && res.message?.includes("no_bundle")) {
+        else if (isSiteDeleted(res)) {
+          // Definitive: only a deleted site gets this (never a revoked or wrong key, which is a 401).
+          deleted = true;
+          current = null;
+          currentToken = null;
+          etag = null;
+          logRateLimited(
+            "fetch:site_deleted",
+            "this site was deleted in Evolve Cloud: serving control",
+            undefined,
+            3_600_000,
+          );
+        } else if (
+          res.status === "error" &&
+          res.code === 404 &&
+          res.message?.includes("no_bundle")
+        ) {
           // A new site before its first started experiment: normal, so say what it means.
           logRateLimited(
             "fetch:no_bundle",

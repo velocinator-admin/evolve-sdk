@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseSecretKey, verifyBundle } from "@next-evolve/protocol";
 import { trustedKeys } from "../core/keys";
-import { fetchBundle } from "../store/fetch";
+import { fetchBundle, isSiteDeleted } from "../store/fetch";
 import { DEFAULT_CLOUD_URL } from "../store/runtime";
 
 type Env = Record<string, string | undefined>;
@@ -70,6 +70,13 @@ export async function pullCommand(_args: string[], deps: PullDeps): Promise<numb
   const cloudUrl = env.EVOLVE_CLOUD_URL ?? DEFAULT_CLOUD_URL;
   if (!cloudUrl) return keep("no cloud URL");
   const res = await fetchBundle({ cloudUrl, secretKey: key, timeoutMs: 10_000 });
+  if (isSiteDeleted(res)) {
+    write(null);
+    err(
+      "next-evolve pull: this site was deleted in Evolve Cloud; wrote an empty build bundle (control)",
+    );
+    return 0;
+  }
   if (res.status === "error") return keep(`bundle fetch failed (${res.code})`);
   if (res.status !== "ok") return keep("unexpected 304");
   const v = valid(res.token);
