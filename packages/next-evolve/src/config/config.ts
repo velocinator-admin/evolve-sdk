@@ -9,7 +9,22 @@ export type EvolveConfig = {
   store?: "auto" | "memory" | "global-config";
   sync?: { pollSeconds?: number };
   database?: { urlEnv?: string };
-  aggregate?: { maxMs?: number; statementTimeoutMs?: number };
+  aggregate?: {
+    maxMs?: number;
+    statementTimeoutMs?: number;
+    /**
+     * push (default): the cloud calls `/api/evolve/aggregate`. pull: the app
+     * polls the cloud every 60 s and posts results back, for servers the cloud
+     * can't reach. Pull needs a long-running Node server (`next start`, Docker).
+     */
+    mode?: "push" | "pull";
+  };
+  /**
+   * Delete local events older than this many days (minimum 30), once a day,
+   * from inside aggregate requests. Unset (default): nothing is deleted.
+   * Never deletes data a running or paused experiment still needs.
+   */
+  retentionDays?: number;
   cookies?: { maxAgeDays?: number; domain?: string };
   /** Return false to serve control and set no cookies (e.g. before consent). */
   consent?: (req: Request) => boolean;
@@ -29,13 +44,17 @@ export type ResolvedConfig = {
   store: "auto" | "memory" | "global-config";
   pollSeconds: number;
   databaseUrlEnv: string;
-  aggregate: { maxMs: number; statementTimeoutMs: number };
+  aggregate: { maxMs: number; statementTimeoutMs: number; mode: "push" | "pull" };
+  retentionDays: number | null;
   cookies: { maxAgeDays: number; domain: string | undefined };
   consent: ((req: Request) => boolean) | undefined;
   botPatterns: readonly string[];
   cdnRouting: { maxAgeSeconds: number } | null;
   debug: boolean;
 };
+
+/** Smallest allowed `retentionDays`. */
+export const MIN_RETENTION_DAYS = 30;
 
 /** Normalizes a pathname: no trailing slash (except "/"), no empty segments. */
 export function normalizePath(p: string): string {
@@ -80,6 +99,17 @@ export function resolveConfig(config: EvolveConfig): ResolvedConfig {
     }
     cdnRouting = { maxAgeSeconds: maxAge };
   }
+  const aggregateMode = config.aggregate?.mode ?? "push";
+  if (aggregateMode !== "push" && aggregateMode !== "pull") {
+    throw new Error('[evolve] aggregate.mode must be "push" or "pull"');
+  }
+  const retentionDays = config.retentionDays ?? null;
+  if (
+    retentionDays !== null &&
+    (!Number.isInteger(retentionDays) || retentionDays < MIN_RETENTION_DAYS || retentionDays > 3650)
+  ) {
+    throw new Error(`[evolve] retentionDays must be an integer from ${MIN_RETENTION_DAYS} to 3650`);
+  }
   const r: ResolvedConfig = {
     routes,
     store: config.store ?? "auto",
@@ -88,7 +118,9 @@ export function resolveConfig(config: EvolveConfig): ResolvedConfig {
     aggregate: {
       maxMs: config.aggregate?.maxMs ?? 25_000,
       statementTimeoutMs: config.aggregate?.statementTimeoutMs ?? 20_000,
+      mode: aggregateMode,
     },
+    retentionDays,
     cookies: { maxAgeDays: config.cookies?.maxAgeDays ?? 365, domain: config.cookies?.domain },
     consent: config.consent,
     botPatterns: config.bots?.extraPatterns ?? [],

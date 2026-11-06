@@ -60,6 +60,10 @@ Bundles read from the store are verified like any other. Without the token the s
 
 `registerEvolve()` (in `instrumentation.ts`) polls in the background and caches the bundle on disk in `os.tmpdir()`, or `EVOLVE_CACHE_DIR`. Mount a volume there if you want restarts to survive a cloud outage. The writer flushes buffered events on `SIGTERM`.
 
+### Pull mode: servers the cloud can't reach
+
+If the cloud can't call your app (a firewalled or private network, no public URL), set `aggregate: { mode: "pull" }` in `evolve.config.ts` (since 0.7). `registerEvolve()` then polls `GET /v1/aggregate-requests` every 60 s with your secret key, runs each request exactly like the aggregate route would (same signature check, runner, lock and budget), and posts the signed result to `POST /v1/aggregates`. Only outbound HTTPS to the cloud is needed. The cloud switches a site to pull as soon as it polls, and back to push (if it has an app URL) when it hasn't polled for 15 minutes. The Connect page shows the mode and the last poll. Pull needs a long-running Node server (`next start`, Docker); on serverless hosts the cloud must reach `/api/evolve/aggregate` (push, the default). The sync webhook still needs the app URL; without it instances pick up new bundles from their 60 s poll.
+
 ### CDNs
 
 On Vercel the cache keys on the rewritten path, so each variant is cached separately. Elsewhere, the proxy sets `Cache-Control: private, no-store` on tested routes. If a CDN in front of your app ignores that and caches by URL, every visitor gets whichever variant was cached first. Don't cache tested routes at the CDN, or include the `evolve_a` cookie in the cache key.

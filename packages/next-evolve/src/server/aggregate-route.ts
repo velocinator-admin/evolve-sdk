@@ -58,42 +58,70 @@ export function firstMessage(guard: ReplayGuard, t: number, body: string): boole
   return guard.check(`msg:${t}:${createHash("sha256").update(body).digest("base64url")}`);
 }
 
-const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
-  Response.json(body, { status, headers });
+export type SignedCall = { body: string; signature: string | null; delivery: string | null };
+
+/** An answer to a signed aggregate request: what the route returns, or the pull loop uploads. */
+export type AggregateAnswer = { status: number; body: string; headers: Record<string, string> };
+
+const answer = (status: number, body: unknown, headers: Record<string, string> = {}) => ({
+  status,
+  body: JSON.stringify(body),
+  headers: { "content-type": "application/json", ...headers },
+});
 
 export async function handleAggregate(req: Request, deps: AggregateRouteDeps): Promise<Response> {
+  const a = await answerAggregate(
+    {
+      body: await req.text(),
+      signature: req.headers.get(SIGNATURE_HEADER),
+      delivery: req.headers.get(DELIVERY_HEADER),
+    },
+    deps,
+  );
+  return new Response(a.body, { status: a.status, headers: a.headers });
+}
+
+/**
+ * Verifies a signed aggregate request (signature, replay, pv, schema, site),
+ * runs it, and signs the answer. Shared by the push route and pull mode, so
+ * both answer exactly the same way.
+ */
+export async function answerAggregate(
+  call: SignedCall,
+  deps: AggregateRouteDeps,
+): Promise<AggregateAnswer> {
   const secret = deps.env.EVOLVE_WEBHOOK_SECRET;
   const site = parseSecretKey(deps.env.EVOLVE_SECRET_KEY ?? "")?.siteId;
-  if (!secret || !site) return json(503, { error: "not_configured" });
+  if (!secret || !site) return answer(503, { error: "not_configured" });
 
-  const body = await req.text();
-  if (Buffer.byteLength(body) > MAX_BODY_BYTES) return json(413, { error: "too_large" });
+  const { body } = call;
+  if (Buffer.byteLength(body) > MAX_BODY_BYTES) return answer(413, { error: "too_large" });
 
   const now = deps.now ?? Date.now;
-  const sig = verifyBody(req.headers.get(SIGNATURE_HEADER), body, secret, {
+  const sig = verifyBody(call.signature, body, secret, {
     now: Math.floor(now() / 1000),
   });
-  if (!sig.ok) return json(401, { error: "invalid_signature", reason: sig.reason });
+  if (!sig.ok) return answer(401, { error: "invalid_signature", reason: sig.reason });
   const guard = deps.replay ?? sharedReplayGuard();
-  if (!firstDelivery(guard, req.headers.get(DELIVERY_HEADER), sig.t, body)) {
-    return json(409, { error: "replayed" });
+  if (!firstDelivery(guard, call.delivery, sig.t, body)) {
+    return answer(409, { error: "replayed" });
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
   } catch {
-    return json(400, { error: "invalid_json" });
+    return answer(400, { error: "invalid_json" });
   }
   if (!isSupportedProtocol((parsed as { pv?: unknown } | null)?.pv)) {
-    return json(400, unsupportedProtocolBody());
+    return answer(400, unsupportedProtocolBody());
   }
   const r = aggregateRequestSchema.safeParse(parsed);
-  if (!r.success) return json(400, { error: "invalid" });
-  if (r.data.site !== site) return json(403, { error: "site_mismatch" });
+  if (!r.success) return answer(400, { error: "invalid" });
+  if (r.data.site !== site) return answer(403, { error: "site_mismatch" });
 
   const sql = deps.sql();
-  if (!sql) return json(503, { error: "no_database" });
+  if (!sql) return answer(503, { error: "no_database" });
 
   let result: Awaited<ReturnType<typeof runAggregate>>;
   try {
@@ -102,25 +130,27 @@ export async function handleAggregate(req: Request, deps: AggregateRouteDeps): P
       statementTimeoutMs: deps.config.aggregate.statementTimeoutMs,
       sdkVersion: deps.sdkVersion,
       now,
+      ...(deps.config.retentionDays ? { retentionDays: deps.config.retentionDays } : {}),
     });
   } catch (e) {
     console.error("[evolve] aggregate failed", e);
-    return json(503, { error: "database_error" });
+    return answer(503, { error: "database_error" });
   }
   if (result.kind === "busy") {
-    return json(
+    return answer(
       429,
       { busy: true, retryAfter: result.retryAfter },
       { "retry-after": String(result.retryAfter) },
     );
   }
   const out = JSON.stringify(result.response);
-  return new Response(out, {
+  return {
     status: 200,
+    body: out,
     headers: {
       "content-type": "application/json",
       "cache-control": "no-store",
       [SIGNATURE_HEADER]: signBody(secret, out, Math.floor(now() / 1000)),
     },
-  });
+  };
 }

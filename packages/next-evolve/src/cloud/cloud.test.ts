@@ -6,6 +6,7 @@ import {
   startFakeCloud,
   TEST_SECRET_KEY,
   TEST_SITE,
+  TEST_WEBHOOK_SECRET,
 } from "@next-evolve/fake-cloud";
 import { computeManifestHash } from "@next-evolve/protocol";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -107,6 +108,37 @@ describe("manifest", () => {
     await registerEvolve({ config: fast, goals });
     await new Promise((r) => setTimeout(r, 300));
     expect(count() - before).toBe(0);
+    vi.stubEnv("VERCEL", "");
+  });
+  it("registerEvolve polls for aggregate requests only with aggregate.mode pull on long-running Node", async () => {
+    vi.stubEnv("EVOLVE_CACHE_DIR", mkdtempSync(join(tmpdir(), "evolve-pull-")));
+    vi.stubEnv("EVOLVE_WEBHOOK_SECRET", TEST_WEBHOOK_SECRET);
+    const polls = () => cloud.calls.filter((c) => c.path === "/v1/aggregate-requests").length;
+    let before = polls();
+    await registerEvolve({ config, goals });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(polls() - before).toBe(0); // push (default)
+
+    resetRegisterEvolve();
+    before = polls();
+    await registerEvolve({
+      config: defineConfig({ ...config, aggregate: { mode: "pull" } }),
+      goals,
+    });
+    await expect.poll(() => polls() - before).toBe(1);
+    resetRegisterEvolve();
+
+    vi.stubEnv("VERCEL", "1");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    before = polls();
+    await registerEvolve({
+      config: defineConfig({ ...config, aggregate: { mode: "pull" } }),
+      goals,
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(polls() - before).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/long-running Node/));
+    warn.mockRestore();
     vi.stubEnv("VERCEL", "");
   });
 });

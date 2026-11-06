@@ -16,6 +16,7 @@ import {
 } from "@next-evolve/protocol";
 import type { Sql } from "../db/client";
 import { runAttribution } from "./attribution";
+import { retentionStep } from "./retention";
 
 export type RunAggregateOptions = {
   /** Whole-request budget (spec: 25 s). */
@@ -24,6 +25,8 @@ export type RunAggregateOptions = {
   statementTimeoutMs: number;
   sdkVersion: string;
   now?: () => number;
+  /** `retentionDays` from the config: run the daily local cleanup (OPS-1). */
+  retentionDays?: number;
 };
 
 export type RunAggregateResult =
@@ -185,6 +188,15 @@ export async function runAggregate(
         ${createHash("sha256").update(body).digest("hex")}, (${body}::text)::jsonb)
       on conflict (request_id) do nothing`;
     await conn`delete from evolve.aggregate_runs where received_at < now() - ${RUN_TTL}::interval`;
+    // Retention uses what's left of the budget, under the same lock.
+    if (opts.retentionDays) {
+      await retentionStep(conn, {
+        experimentIds: req.experiments.map((e) => e.id),
+        retentionDays: opts.retentionDays,
+        budgetMs: deadline - now() - 1_000,
+        now: now(),
+      });
+    }
     return { kind: "ok", response, cached: false };
   } finally {
     if (locked) {

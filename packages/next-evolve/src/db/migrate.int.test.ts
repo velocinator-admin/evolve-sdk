@@ -18,10 +18,12 @@ const tables = async () =>
 describe("migrate", () => {
   it("creates the schema from empty", async () => {
     const r = await migrate(sql);
-    expect(r.applied).toEqual(["0001_init", "0002_vitals"]);
+    expect(r.applied).toEqual(["0001_init", "0002_vitals", "0003_retention"]);
     expect(await tables()).toEqual([
       "aggregate_runs",
+      "cleanup_runs",
       "events",
+      "experiment_activity",
       "exposures",
       "identities",
       "migrations",
@@ -32,14 +34,21 @@ describe("migrate", () => {
 
   it("is idempotent", async () => {
     await migrate(sql);
-    expect(await migrate(sql)).toEqual({ applied: [], skipped: ["0001_init", "0002_vitals"] });
+    expect(await migrate(sql)).toEqual({
+      applied: [],
+      skipped: ["0001_init", "0002_vitals", "0003_retention"],
+    });
   });
 
   it("is safe when several runs race", async () => {
     const others = Array.from({ length: 4 }, () => testSql());
     const results = await Promise.all(others.map((s) => migrate(s)));
     await Promise.all(others.map((s) => s.end()));
-    expect(results.flatMap((r) => r.applied)).toEqual(["0001_init", "0002_vitals"]);
+    expect(results.flatMap((r) => r.applied)).toEqual([
+      "0001_init",
+      "0002_vitals",
+      "0003_retention",
+    ]);
   });
 
   it("rolls back everything when a migration fails", async () => {
@@ -59,8 +68,14 @@ describe("migrate", () => {
     await sql`insert into evolve.usage_daily (day, tested_pageviews) values ('2026-11-01', 7)`;
     const before = await sql`select * from evolve.exposures`;
 
-    expect(await migrate(sql)).toEqual({ applied: ["0002_vitals"], skipped: ["0001_init"] });
-    expect(await migrate(sql)).toEqual({ applied: [], skipped: ["0001_init", "0002_vitals"] });
+    expect(await migrate(sql)).toEqual({
+      applied: ["0002_vitals", "0003_retention"],
+      skipped: ["0001_init"],
+    });
+    expect(await migrate(sql)).toEqual({
+      applied: [],
+      skipped: ["0001_init", "0002_vitals", "0003_retention"],
+    });
     expect(await sql`select * from evolve.exposures`).toEqual(before);
     expect((await sql`select tested_pageviews::int as n from evolve.usage_daily`)[0]?.n).toBe(7);
 
