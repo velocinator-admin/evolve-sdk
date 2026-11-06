@@ -1,5 +1,17 @@
 # next-evolve
 
+## 0.7.0
+
+### Minor Changes
+
+- b8bc6e6: Pull-mode aggregation (AGG-2): `aggregate: { mode: "pull" }` in `evolve.config.ts` makes `registerEvolve()` on a long-running Node server poll `GET /v1/aggregate-requests` every 60 s, answer each signed request with the same code as the aggregate route, and post the signed result to `POST /v1/aggregates`. For servers the cloud can't reach. Push stays the default. Protocol 1.2.0 adds `aggregatePullSchema`, `AGGREGATE_PULL_PATH` and the `aggregate-pull.json` fixture; existing messages and fixtures are unchanged.
+- b8bc6e6: Local retention (OPS-1): `retentionDays` (minimum 30; unset = nothing is deleted, as before) deletes old local events, vitals days and the exposures of stopped experiments once a day, from inside aggregate requests (push or pull), in batches of 5,000 rows. It never deletes data a running or paused experiment still needs. New migration `0003_retention` (two small tables): run `npx next-evolve migrate`.
+
+### Patch Changes
+
+- Updated dependencies [b8bc6e6]
+  - @next-evolve/protocol@1.2.0
+
 ## 0.6.2
 
 ### Patch Changes
