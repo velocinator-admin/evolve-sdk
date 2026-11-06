@@ -9,6 +9,7 @@ export * from "./jws";
 export * from "./keys";
 export * from "./manifest";
 export * from "./preview";
+export * from "./pull";
 export * from "./sync";
 export * from "./verify-bundle";
 export * from "./version";

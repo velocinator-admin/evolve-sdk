@@ -359,3 +359,90 @@ describe("test controls (T12.1a)", () => {
     expect(seen[0]?.sig).toMatch(/^t=1000,/);
   });
 });
+
+describe("pull mode (AGG-2)", () => {
+  const exp = {
+    id: "k3j9x2",
+    variants: ["a8f2l1", "c1d2e3"],
+    cohortsFrom: "2026-11-01",
+    goals: [
+      {
+        key: "signed_up",
+        role: "primary" as const,
+        hash: "h1",
+        def: {
+          kind: "event" as const,
+          event: "signed_up",
+          window: "7d",
+          unit: "visitor" as const,
+          source: null,
+          where: null,
+          value: null,
+          direction: "increase" as const,
+        },
+      },
+    ],
+  };
+  const auth = { authorization: `Bearer ${TEST_SECRET_KEY}` };
+
+  it("leases queued requests signed like a push, once per lease, and takes their answers", async () => {
+    const c = await startFakeCloud({ leaseMs: 60_000 });
+    try {
+      const queued = c.queueAggregate({ experiments: [exp] });
+      const poll = async () =>
+        (await (await fetch(`${c.url}/v1/aggregate-requests`, { headers: auth })).json()) as {
+          pv: number;
+          requests: { body: string; signature: string; delivery: string }[];
+        };
+      const first = await poll();
+      expect(first.pv).toBe(1);
+      expect(first.requests).toHaveLength(1);
+      const item = first.requests[0]!;
+      expect(verifyBody(item.signature, item.body, TEST_WEBHOOK_SECRET).ok).toBe(true);
+      expect((JSON.parse(item.body) as AggregateRequest).requestId).toBe(queued.requestId);
+      expect((await poll()).requests).toHaveLength(0); // leased
+
+      const answer = JSON.stringify({
+        pv: 1,
+        requestId: queued.requestId,
+        site: TEST_SITE,
+        asOf: queued.asOf,
+        sdk: "test",
+        mode: queued.mode,
+        durationMs: 1,
+        partial: false,
+        remaining: [],
+        rows: [],
+        usage: [],
+        errors: [],
+      });
+      const upload = () =>
+        fetch(`${c.url}/v1/aggregates`, {
+          method: "POST",
+          headers: { ...auth, "evolve-signature": signBody(TEST_WEBHOOK_SECRET, answer) },
+          body: answer,
+        });
+      expect((await upload()).status).toBe(200);
+      expect((await upload()).status).toBe(409);
+      expect(c.pulled[0]?.answered).toBe(true);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("refuses an answer to a request that wasn't handed out", async () => {
+    const c = await startFakeCloud();
+    try {
+      const queued = c.queueAggregate({ experiments: [exp] });
+      const answer = JSON.stringify({ requestId: queued.requestId });
+      const res = await fetch(`${c.url}/v1/aggregates`, {
+        method: "POST",
+        headers: { ...auth, "evolve-signature": signBody(TEST_WEBHOOK_SECRET, answer) },
+        body: answer,
+      });
+      expect(res.status).toBe(404);
+    } finally {
+      await c.close();
+    }
+  });
+});

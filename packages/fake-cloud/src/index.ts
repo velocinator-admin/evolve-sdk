@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
+  AGGREGATE_PULL_PATH,
   type AggregateRequest,
   type AggregateResponse,
   aggregateRequestSchema,
@@ -90,11 +91,23 @@ export type WebhookExchange = {
   at: number;
 };
 
-/** A CLI upload (`POST /v1/aggregates`). */
+/** An upload (`POST /v1/aggregates`): the CLI's, or a pull-mode answer. */
 export type AggregateUpload = {
   site: string;
   verified: boolean;
   response: AggregateResponse | null;
+  /** True when it answers a request handed out by `GET /v1/aggregate-requests`. */
+  pulled?: boolean;
+};
+
+/** A request queued for pull mode, and what happened to it. */
+export type PulledExchange = {
+  site: string;
+  request: AggregateRequest;
+  /** Times it was handed out (a lease that expired is handed out again). */
+  leases: number;
+  leasedUntil: number;
+  answered: boolean;
 };
 
 export type FakeCloud = {
@@ -117,6 +130,13 @@ export type FakeCloud = {
   /** The next request handed to `next-evolve aggregate` (`POST /v1/aggregates/request`), per site. */
   setAggregateRequest(site: string, input: AggregateInput): void;
   uploads: AggregateUpload[];
+  /**
+   * Queues a request for pull mode: `GET /v1/aggregate-requests` hands it to
+   * the site (signed like a push) until it's answered; a lease lasts
+   * `leaseMs` (default 5 min), then it's handed out again.
+   */
+  queueAggregate(input: AggregateInput, opts?: { site?: string }): AggregateRequest;
+  pulled: PulledExchange[];
   /** Signs a dashboard-style preview token that forces `code` on `site`. */
   preview(input: { site?: string; code: string; exp?: number }): string;
   /** Sites whose bearer requests get their connection dropped (cloud unreachable). */
@@ -145,6 +165,8 @@ type Stored = { token: string; payload: BundlePayload };
  * - `POST /__control/outage` ({ site?, down }) → that site's bearer requests drop the connection
  * - `POST /__control/aggregate-request` ({ site?, request }) → what `/v1/aggregates/request` returns
  * - `POST /v1/aggregates/request`, `POST /v1/aggregates` (CLI: fetch a request, upload its signed response)
+ * - `GET /v1/aggregate-requests` (pull mode: leases queued requests, signed like a push)
+ * - `POST /__control/aggregate-queue` ({ site?, request }) → queues a request for pull mode
  */
 export async function startFakeCloud(
   opts: {
@@ -153,6 +175,8 @@ export async function startFakeCloud(
     webhookSecrets?: Record<string, string>;
     /** Sites that start out unreachable (see {@link FakeCloud.down}). */
     downSites?: string[];
+    /** Pull-mode lease (ms). */
+    leaseMs?: number;
   } = {},
 ): Promise<FakeCloud> {
   const down = new Set(opts.downSites ?? []);
@@ -165,6 +189,14 @@ export async function startFakeCloud(
   const aggregates: AggregateExchange[] = [];
   const uploads: AggregateUpload[] = [];
   const pendingRequests = new Map<string, AggregateInput>();
+  const pulled: PulledExchange[] = [];
+  const leaseMs = opts.leaseMs ?? 300_000;
+  const queueAggregate = (input: AggregateInput, o: { site?: string } = {}) => {
+    const site = o.site ?? TEST_SITE;
+    const request = fill(site, input);
+    pulled.push({ site, request, leases: 0, leasedUntil: 0, answered: false });
+    return request;
+  };
 
   const fill = (site: string, input: AggregateInput): AggregateRequest =>
     aggregateRequestSchema.parse({
@@ -358,13 +390,54 @@ export async function startFakeCloud(
       return send(200, { request: fill(site, input) });
     }
 
+    if (req.method === "GET" && url.pathname === AGGREGATE_PULL_PATH) {
+      if (!site) return send(401, { error: "invalid_key" });
+      const now = Date.now();
+      const due = pulled
+        .filter((p) => p.site === site && !p.answered && p.leasedUntil <= now)
+        .slice(0, 10);
+      const requests = due.map((p) => {
+        p.leases++;
+        p.leasedUntil = now + leaseMs;
+        const body = JSON.stringify(p.request);
+        return { delivery: randomUUID(), signature: signBody(secretFor(site), body), body };
+      });
+      return send(200, { pv: PROTOCOL_VERSION, requests }, { "cache-control": "no-store" });
+    }
+
     if (req.method === "POST" && url.pathname === "/v1/aggregates") {
       if (!site) return send(401, { error: "invalid_key" });
       const text = await readBody(req);
-      const response = checkResponse(site, text, header(req, SIGNATURE_HEADER));
-      uploads.push({ site, verified: response !== null, response });
+      let id: unknown;
+      try {
+        id = (JSON.parse(text) as { requestId?: unknown }).requestId;
+      } catch {}
+      // A pull answer must answer a request handed out to this very site.
+      const issued = pulled.find((p) => p.request.requestId === id);
+      if (issued && (issued.site !== site || issued.leases === 0)) {
+        uploads.push({ site, verified: false, response: null, pulled: true });
+        return send(404, { error: "unknown_request" });
+      }
+      if (issued?.answered) return send(409, { error: "already_stored" });
+      const response = checkResponse(site, text, header(req, SIGNATURE_HEADER), issued?.request);
+      uploads.push({
+        site,
+        verified: response !== null,
+        response,
+        ...(issued ? { pulled: true } : {}),
+      });
       if (!response) return send(400, { error: "invalid_response" });
+      if (issued) issued.answered = true;
       return send(200, { ok: true, rows: response.rows.length });
+    }
+
+    if (req.method === "POST" && url.pathname === "/__control/aggregate-queue") {
+      try {
+        const b = JSON.parse(await readBody(req)) as { site?: string; request: AggregateInput };
+        return send(200, { request: queueAggregate(b.request, { site: b.site }) });
+      } catch (e) {
+        return send(400, { error: String(e) });
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/__control/aggregate") {
@@ -499,6 +572,7 @@ export async function startFakeCloud(
         regions: Object.fromEntries([...regions].map(([k, v]) => [k, Object.fromEntries(v)])),
         aggregates,
         uploads,
+        pulled,
         webhooks,
         appUrls: Object.fromEntries(appUrls),
       });
@@ -530,6 +604,8 @@ export async function startFakeCloud(
       pendingRequests.set(site, input);
     },
     uploads,
+    queueAggregate,
+    pulled,
     preview,
     down,
     webhook,

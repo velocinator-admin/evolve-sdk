@@ -1,6 +1,7 @@
 // Regenerates fixtures/v1/*.json. Run: pnpm --filter @next-evolve/protocol fixtures
 import { writeFileSync } from "node:fs";
 import { computeBundleHash } from "../src/bundle";
+import { signBody } from "../src/hmac";
 import { VITALS_BINS, type VitalsMetric } from "../src/vitals";
 
 const dir = new URL("../fixtures/v1/", import.meta.url);
@@ -126,6 +127,19 @@ const aggregateRequest = {
 write("aggregate-request.json", aggregateRequest);
 // Protocol 1.1.0: the same messages plus vitals (1.0.0 readers ignore the field).
 write("aggregate-request-vitals.json", { ...aggregateRequest, vitals: { from: "2026-11-20" } });
+// Protocol 1.2.0 (pull mode): the same request, signed as a push would be, handed out by
+// `GET /v1/aggregate-requests`. Signed with the fixture secret "whsec_fixture" at `iat`.
+const pulledBody = JSON.stringify(aggregateRequest);
+write("aggregate-pull.json", {
+  pv: 1,
+  requests: [
+    {
+      delivery: "6f9c1a52-3b7e-4d21-9a0c-5e8b2f4d7c11",
+      signature: signBody("whsec_fixture", pulledBody, iat),
+      body: pulledBody,
+    },
+  ],
+});
 
 const r = (v: string, goalKey: string, day: string, n: number, c: number, s1 = 0, s2 = 0) => ({
   exp: "k3j9x2",
