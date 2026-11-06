@@ -69,6 +69,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          # No install: the simulator has no dependencies (and pnpm isn't set up here).
+          package-manager-cache: false
       - name: Simulate visitors
         env:
           EVENT: ${{ github.event_name }}
