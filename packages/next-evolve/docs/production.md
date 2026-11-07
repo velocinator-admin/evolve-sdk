@@ -36,6 +36,8 @@
 
 ## Hosts
 
+Per-host setup (Docker standalone, Netlify, Cloudflare in front): [hosting.md](hosting.md).
+
 |                             | Vercel                                                                              | Vercel + Global Config                                                  | Node server / Docker (`next start`)                                         |
 | --------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Fresh instance serves       | the build-time bundle                                                               | the bundle in Global Config (waits ≤ 20 ms), then the build-time bundle | the disk cache, then the build-time bundle                                  |
@@ -66,7 +68,7 @@ If the cloud can't call your app (a firewalled or private network, no public URL
 
 ### CDNs
 
-On Vercel the cache keys on the rewritten path, so each variant is cached separately. Elsewhere, the proxy sets `Cache-Control: private, no-store` on tested routes. If a CDN in front of your app ignores that and caches by URL, every visitor gets whichever variant was cached first. Don't cache tested routes at the CDN, or include the `evolve_a` cookie in the cache key.
+On Vercel the cache keys on the rewritten path, so each variant is cached separately. Elsewhere, the proxy sets `Cache-Control: private, no-store` on tested routes. If a CDN in front of your app ignores that and caches by URL, every visitor gets whichever variant was cached first. Don't cache tested routes at the CDN. Cloudflare cache rules, Netlify (beta) and Docker: [hosting.md](hosting.md). `doctor` names the CDN it sees in front of your site and fails if a tested route came from its cache.
 
 ### Faster repeat views on Vercel (`cdnRouting`)
 
