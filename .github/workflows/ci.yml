@@ -50,6 +50,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          # No install here, so there is no pnpm store to cache (v5 caches by default).
+          package-manager-cache: false
       - run: pnpm audit --audit-level high
 
   integration:
