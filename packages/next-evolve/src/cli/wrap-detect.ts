@@ -81,7 +81,7 @@ export function findPages(root: string, appDir: string): PageFile[] {
 export const normalizeRoute = (r: string) => `/${r.trim().replace(/^\/+|\/+$/g, "")}`;
 
 const NAME_HINT =
-  /hero|pricing|price|plan|cta|calltoaction|banner|headline|testimonial|faq|feature|signup|newsletter|offer|promo|announcement|highlight|countdown|valueprop|intro|benefit/i;
+  /hero|pricing|price|plan|cta|calltoaction|banner|headline|testimonial|faq|feature|signup|newsletter|offer|promo|announcement|highlight|countdown|valueprop|intro|benefit|quote|review/i;
 const NAME_NEGATIVE =
   /footer|nav|header$|layout|container|wrapper|provider|icon|logo$|divider|spacer|skeleton/i;
 const PROP_HEADING = /^(title|headline|heading|name)$|title$|headline$|heading$/i;

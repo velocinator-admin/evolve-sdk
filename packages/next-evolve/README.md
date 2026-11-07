@@ -59,7 +59,9 @@ If you already have a `proxy.ts`/`middleware.ts`, or `init` can't edit your layo
 
 ### 4. Make a component optimizable
 
-Declare which props Evolve may change with a Zod schema, next to the component:
+**Let `wrap` do it:** `npx next-evolve wrap /pricing` finds the components the page renders, generates the Zod schema from their TypeScript props and rewrites the usage, showing the diff first and restoring every file if `tsc` fails. See [docs/wrap.md](docs/wrap.md).
+
+Or by hand: declare which props Evolve may change with a Zod schema, next to the component:
 
 ```tsx
 // components/hero.tsx
@@ -157,6 +159,7 @@ More in [docs/production.md](docs/production.md).
 
 - [Concepts](docs/concepts.md): regions, variants, experiments, the bundle, static vs dynamic mode, cookies, bots
 - [API reference](docs/api.md): components, functions, CLI, HTTP routes
+- [Wrap components for you](docs/wrap.md): `next-evolve wrap` generates schemas and `<Optimizable>` usages from your props
 - [Goals and attribution](docs/goals-and-attribution.md): defining goals, tracking events, how conversions are attributed
 - [Stripe recipe](docs/stripe.md): count paid subscriptions as a goal
 - [Going to production](docs/production.md): env, app URL, hosting (Vercel, Docker, Node), sync, firewalls

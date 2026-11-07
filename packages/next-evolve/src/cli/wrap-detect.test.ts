@@ -23,6 +23,7 @@ describe("pages and routes", () => {
     expect(routeOf("app", "app/lp/[slug]/page.tsx")).toBe("/lp/[slug]");
     expect(findPages(CORPUS, "app").map((p) => p.route)).toEqual([
       "/story",
+      "/extras",
       "/features",
       "/launch",
       "/newsletter",
@@ -60,11 +61,17 @@ describe("candidates", () => {
       "StatsStrip",
     ]);
     expect(detect("/story").candidates.map((c) => c.name)).toEqual(["HeroSplit", "StoryIntro"]);
+    // forwardRef client component, anonymous default-exported arrow; generics are skipped.
+    const extras = detect("/extras");
+    expect(extras.candidates.map((c) => c.name)).toEqual(["PromoButton", "QuoteCard"]);
+    expect(extras.skipped).toEqual([
+      { page: "app/extras/page.tsx", tag: "OptionList", why: "a generic component" },
+    ]);
   });
 
   it("recommends all but the weakest (StatsStrip: one optional caption)", () => {
     const d = detect();
-    expect(d.candidates).toHaveLength(16);
+    expect(d.candidates).toHaveLength(18);
     expect(d.candidates.filter((c) => !c.recommended).map((c) => c.name)).toEqual(["StatsStrip"]);
   });
 

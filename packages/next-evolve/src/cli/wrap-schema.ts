@@ -25,7 +25,6 @@ const FIXED = new Set(["className", "style", "id", "key", "ref", "as", "testId",
 const inPackage = (sf: TS.SourceFile) => /[\\/]node_modules[\\/]/.test(sf.fileName);
 
 function fixedReason(name: string): string | null {
-  if (name === "children") return "React content";
   if (FIXED.has(name)) return "styling or an identifier";
   if (/^(aria|data)-/.test(name)) return "an HTML attribute";
   if (/^on[A-Z]/.test(name)) return "an event handler";

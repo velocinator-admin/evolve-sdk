@@ -119,6 +119,22 @@ exports[`schema per corpus component > components/pricing-table.tsx (PricingTabl
 // Kept as you pass them (not editable): plans (an array of objects)."
 `;
 
+exports[`schema per corpus component > components/promo-button.tsx (PromoButton) 1`] = `
+"z.object({
+  label: z.string().max(40),
+  variant: z.enum(["primary", "ghost"]).optional(),
+})
+(all editable)"
+`;
+
+exports[`schema per corpus component > components/quote-card.tsx (QuoteCard) 1`] = `
+"z.object({
+  quote: z.string().max(400),
+  source: z.string().max(120),
+})
+// Kept as you pass them (not editable): icon (React content)."
+`;
+
 exports[`schema per corpus component > components/signup-cta.tsx (SignupCta) 1`] = `
 "z.object({
   label: z.string().max(40),
