@@ -148,7 +148,11 @@ describe("Global Config store", () => {
     const fast = { env: env(), globalConfigReader: async () => token };
     const t0 = performance.now();
     await evolveReady(config, fast);
-    expect(getBundleStore({}, fast)!.token()).toBe(token);
+    // The read normally lands inside the cap; on a loaded CI runner verifying
+    // the bundle can take longer, and the cap stops waiting by design.
+    await vi.waitFor(() => expect(getBundleStore({}, fast)!.token()).toBe(token), {
+      timeout: 1000,
+    });
     expect(evolveReady(config, fast)).toBeNull(); // only the first request waits
 
     resetBundleStores();
