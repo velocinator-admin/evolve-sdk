@@ -2,10 +2,13 @@
 // all-or-nothing writes (an injected check failure restores every byte).
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { project } from "../../test/project";
 import { parsePick, tscErrorFiles, type VerifyStep, type WrapDeps, wrapCommand } from "./wrap";
 import type { Candidate } from "./wrap-detect";
+
+// Each test builds a TypeScript program over the corpus: ~6 s on a CI runner.
+vi.setConfig({ testTimeout: 30_000 });
 
 const PKG = JSON.stringify({
   name: "app",

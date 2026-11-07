@@ -1,10 +1,13 @@
 // T22.2: candidate detection on the wrap corpus: expected candidates, ranked; skips explained.
 import { resolve } from "node:path";
 import { REGION_ID_RE } from "@next-evolve/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { project } from "../../test/project";
 import { loadTypescript } from "./pages";
 import { type Detection, detectCandidates, findPages, regionId, routeOf } from "./wrap-detect";
+
+// Each test builds a TypeScript program over the corpus: ~6 s on a CI runner.
+vi.setConfig({ testTimeout: 30_000 });
 
 const CORPUS = resolve(__dirname, "../../test/wrap-corpus");
 const ts = loadTypescript(CORPUS)!;

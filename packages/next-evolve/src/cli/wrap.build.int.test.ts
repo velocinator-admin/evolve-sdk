@@ -14,9 +14,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadTypescript } from "./pages";
 import { detectCandidates } from "./wrap-detect";
+
+// Each test builds a TypeScript program over the corpus: ~6 s on a CI runner.
+vi.setConfig({ testTimeout: 30_000 });
 
 const FIXTURE = resolve(__dirname, "../../../../apps/fixture");
 const CORPUS = resolve(__dirname, "../../test/wrap-corpus");

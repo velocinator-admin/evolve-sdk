@@ -1,9 +1,12 @@
 // T22.3: props → Zod on the wrap corpus (one snapshot per component) and the max-length heuristic.
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { loadTypescript } from "./pages";
 import { type Detection, detectCandidates } from "./wrap-detect";
 import { fixedComment, schemaSource, stringMax, stringMaxFor } from "./wrap-schema";
+
+// Each test builds a TypeScript program over the corpus: ~6 s on a CI runner.
+vi.setConfig({ testTimeout: 30_000 });
 
 const CORPUS = resolve(__dirname, "../../test/wrap-corpus");
 
