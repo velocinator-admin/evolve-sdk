@@ -53,7 +53,7 @@ A server component (async). It renders the variant the proxy chose, or control. 
 
 On a page's first render in a process it registers the region (id, JSON Schema of the props, control props, path) with the cloud, in the background.
 
-With `cacheComponents: true`, wrap it in `<Suspense>`.
+With `cacheComponents: true` on a dynamic-mode page, wrap it in `<Suspense>` (a static `"use cache"` page needs no boundary).
 
 ### `withEvolve(Page, { path })`
 

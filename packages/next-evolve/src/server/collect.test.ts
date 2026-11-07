@@ -183,6 +183,63 @@ describe("collect", () => {
     expect(w.rows.vitals).toHaveLength(3);
   });
 
+  // T31.1: a held beacon holds a browser connection (6 per host on HTTP/1.1), so
+  // after a pause a returning visitor's reloads stalled until the refresh cap.
+  it("answers the beacon before waiting for a refresh, then records once it's done", async () => {
+    let current: ReturnType<typeof sampleBundle> | null = null;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    deps.bundle = () => current;
+    deps.refreshBundle = async () => {
+      await gate;
+      current = sampleBundle();
+    };
+    const deferred: Promise<void>[] = [];
+    deps.defer = (task) => {
+      deferred.push(task());
+      return true;
+    };
+    const status = await Promise.race([
+      handleCollect(
+        req({
+          v: 1,
+          events: [
+            { t: "pv", p: "/" },
+            { t: "exp", e: "k3j9x2", v: "c1d2e3", p: "/" },
+          ],
+        }),
+        deps,
+      ),
+      new Promise((r) => setTimeout(() => r("held"), 200)),
+    ]);
+    expect(status).toBe(204);
+    expect(deferred).toHaveLength(1);
+    expect(w.rows.exposures).toEqual([]);
+    release();
+    await Promise.all(deferred);
+    expect(w.rows.exposures.map((e) => e.variant_id)).toEqual(["c1d2e3"]);
+    expect(w.rows.usage.get("2026-10-31")).toBe(1);
+
+    // Nothing to wait for: recorded inline, nothing deferred.
+    await handleCollect(
+      req({ v: 1, events: [{ t: "exp", e: "k3j9x2", v: "c1d2e3", p: "/" }] }),
+      deps,
+    );
+    expect(deferred).toHaveLength(1);
+    expect(w.rows.exposures).toHaveLength(2);
+
+    // Can't defer (outside a request): waits, then answers.
+    current = null;
+    deps.defer = () => false;
+    await handleCollect(
+      req({ v: 1, events: [{ t: "exp", e: "k3j9x2", v: "c1d2e3", p: "/" }] }),
+      deps,
+    );
+    expect(w.rows.exposures).toHaveLength(3);
+  });
+
   it("forged pairs: at most two refresh rounds, then dropped; a hanging refresh is capped", async () => {
     let calls = 0;
     deps.refreshBundle = async () => {

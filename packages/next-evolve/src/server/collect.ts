@@ -62,15 +62,25 @@ export type CollectDeps = {
   refreshBundle?: () => Promise<void>;
   /** Longest a beacon waits for refreshes, in total (default {@link COLLECT_REFRESH_CAP_MS}). */
   refreshCapMs?: number;
+  /**
+   * Runs a task after the response (`after()` in the route handler). When a
+   * batch needs a refresh, the beacon is answered first and the batch is
+   * recorded here, so the wait never holds the visitor's connection (T31.1).
+   * Returns false when it can't (outside a request): then the refresh is
+   * awaited before answering.
+   */
+  defer?: (task: () => Promise<void>) => boolean;
   isBot: (ua: string | null) => boolean;
   writer: Writer;
   now?: () => Date;
 };
 
 /**
- * Upper bound on a beacon's wait for refreshes: the on-demand window (5 s) plus
- * one bundle fetch (5 s timeout) and some slack. Beacons are fire-and-forget,
- * so this only holds the function invocation, never a visitor.
+ * Upper bound on a batch's wait for refreshes: the on-demand window (5 s) plus
+ * one bundle fetch (5 s timeout) and some slack. With `defer` the wait runs
+ * after the response, so it holds the function invocation, never a visitor:
+ * an open beacon request takes one of the browser's connections to the host
+ * (6 on HTTP/1.1), and a few of them stall the visitor's next navigations.
  */
 export const COLLECT_REFRESH_CAP_MS = 12_000;
 /** The first refresh may share a fetch that started before the publish; one more round covers that. */
@@ -132,12 +142,36 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
     return r.success ? [r.data] : [];
   });
   const now = deps.now?.() ?? new Date();
+  const record = () => recordBatch(events, anon, cookie(req, RULE_COOKIE), now, deps);
+  // A pair the bundle doesn't route (a stale instance, a paused experiment's
+  // cached page, a forgery) waits for a refresh: answer first when we can.
+  if (deps.refreshBundle && hasUnknownPair(deps.bundle(), events) && deps.defer?.(record)) {
+    return 204;
+  }
+  await record();
+  return 204;
+}
+
+/** True when the bundle routes experiment `e` with variant `v`. */
+function knowsPair(bundle: BundlePayload | null, e: string, v: string): boolean {
+  const exp = bundle?.routing.experiments[e];
+  return bundle?.variants[v]?.exp === e && Boolean(exp?.variants.some((x) => x.id === v));
+}
+
+const hasUnknownPair = (bundle: BundlePayload | null, events: BeaconEvent[]) =>
+  events.some((e) => e.t === "exp" && !knowsPair(bundle, e.e, e.v));
+
+/** Refreshes the bundle if the batch names pairs it doesn't know (capped), then queues the rows. */
+async function recordBatch(
+  events: BeaconEvent[],
+  anon: string,
+  ruleCookieValue: string | undefined,
+  now: Date,
+  deps: CollectDeps,
+): Promise<void> {
   let bundle = deps.bundle();
-  const known = (e: string, v: string) => {
-    const exp = bundle?.routing.experiments[e];
-    return bundle?.variants[v]?.exp === e && Boolean(exp?.variants.some((x) => x.id === v));
-  };
-  const unknown = () => events.some((e) => e.t === "exp" && !known(e.e, e.v));
+  const known = (e: string, v: string) => knowsPair(bundle, e, v);
+  const unknown = () => hasUnknownPair(bundle, events);
   if (deps.refreshBundle && unknown()) {
     const refresh = deps.refreshBundle;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -154,7 +188,7 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
   // UTM rules (D76): an exposure of the variant a session rule forces is
   // counted in that rule's segment. Read at write time, so the variant code
   // (and the static page cache) stays the same as for a normal assignment.
-  const ruleCookie = parseRuleCookie(cookie(req, RULE_COOKIE));
+  const ruleCookie = parseRuleCookie(ruleCookieValue);
   const rules = bundle && ruleCookie.size ? compileRules(bundle) : null;
   const segmentOf = (e: string, v: string): string | null => {
     const r = rules ? sessionRule(rules, ruleCookie, e) : null;
@@ -238,5 +272,4 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
   deps.writer.events(rows);
   deps.writer.usage(day, testedPageviews);
   deps.writer.vitals(vitals);
-  return 204;
 }

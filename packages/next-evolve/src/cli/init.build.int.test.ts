@@ -157,4 +157,54 @@ export default function Pricing() {
     expect(build.stdout).toContain("/[evolve]/pricing");
     expect(existsSync(join(dir, ".evolve/bundle.generated.ts"))).toBe(true);
   });
+
+  // T31.2: cacheComponents → static pages cached with "use cache" + cacheLife.
+  it("cacheComponents: static mode builds, control prerendered", { timeout: 240_000 }, async () => {
+    const cc = `${dir}-cc`;
+    rmSync(cc, { recursive: true, force: true });
+    try {
+      freshNextApp(cc, {
+        "next.config.ts": "export default { cacheComponents: true };\n",
+        "components/cta.tsx": 'export function Cta() {\n  return <a href="/signup">Go</a>;\n}\n',
+        "app/pricing/page.tsx": `import type { Metadata } from "next";
+import { Cta } from "../../components/cta";
+
+export const metadata: Metadata = { title: "Pricing" };
+
+export default function Pricing() {
+  return <Cta />;
+}
+`,
+      });
+      const init = await runCli(
+        cc,
+        [
+          "init",
+          "--yes",
+          "--key",
+          TEST_SECRET_KEY,
+          "--webhook-secret",
+          TEST_WEBHOOK_SECRET,
+          "--routes",
+          "/ /pricing",
+        ],
+        cloud.url,
+      );
+      expect(init.status, init.stderr + init.stdout).toBe(0);
+      const page = readFileSync(join(cc, "app/[evolve]/pricing/page.tsx"), "utf8");
+      expect(page).toContain('"use cache";');
+      expect(page).not.toContain("export const revalidate");
+
+      const build = await exec(NEXT, ["build"], {
+        cwd: cc,
+        env: { ...process.env, NODE_ENV: "production" },
+      });
+      expect(build.status, build.stdout + build.stderr).toBe(0);
+      expect(build.stdout).toContain("/[evolve]/pricing");
+      // Control is prerendered at build time (generateStaticParams → ev_0).
+      expect(build.stdout).toMatch(/\/ev_0\/pricing/);
+    } finally {
+      rmSync(cc, { recursive: true, force: true });
+    }
+  });
 });

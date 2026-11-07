@@ -78,3 +78,24 @@ export async function backgroundTask(): Promise<((p: Promise<unknown>) => void) 
     return undefined;
   }
 }
+
+/**
+ * Schedules a task to run after the response (Next's `after()`). The returned
+ * function says false when it can't (outside Next or a request scope), so the
+ * caller runs the task itself.
+ */
+export async function afterResponse(): Promise<(task: () => Promise<unknown>) => boolean> {
+  let after: ((task: () => unknown) => void) | undefined;
+  try {
+    ({ after } = await import("next/server"));
+  } catch {}
+  return (task) => {
+    if (!after) return false;
+    try {
+      after(task);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+}
