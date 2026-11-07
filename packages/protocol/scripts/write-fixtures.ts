@@ -62,6 +62,39 @@ write("bundle-payload.json", {
   variants,
 });
 
+// Protocol 1.3.0 (D75): the same bundle plus UTM rules. `hash` still covers
+// routing + variants only, so 1.2.0 readers verify it.
+write("bundle-payload-rules.json", {
+  pv: 1,
+  site: "site_ab12cd34ef",
+  ver: 13,
+  iat,
+  exp: iat + 14 * 86_400,
+  hash: computeBundleHash({ routing, variants } as never),
+  routing,
+  variants,
+  rules: [
+    {
+      id: "r1s2t3",
+      exp: "k3j9x2",
+      var: "c1d2e3",
+      when: [{ f: "utm_campaign", op: "eq", v: "spring-sale" }],
+    },
+    {
+      id: "u4v5w6",
+      exp: "k3j9x2",
+      var: "f4g5h6",
+      when: [
+        { f: "ref", op: "in", v: ["news.ycombinator.com", "reddit.com"] },
+        { f: "device", op: "eq", v: "mobile" },
+        { f: "country", op: "in", v: ["US", "CA"] },
+        { f: "utm_source", op: "re", v: "^(hn|reddit)" },
+        { f: "utm_medium", op: "prefix", v: "social" },
+      ],
+    },
+  ],
+});
+
 write("webhook-bundle-updated.json", {
   pv: 1,
   type: "bundle.updated",

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { ID_RE, REGION_ID_RE, SITE_ID_RE } from "./ids";
+import { MAX_RULES_PER_BUNDLE, MAX_RULES_PER_EXPERIMENT, ruleReaderSchema } from "./rules";
 
 /** Max experiments that can apply to one route (a variant code holds ≤ 3 pairs). */
 export const MAX_EXPERIMENTS_PER_ROUTE = 3;
@@ -45,6 +46,8 @@ export const bundlePayloadSchema = z
       experiments: z.record(id, experimentSchema),
     }),
     variants: z.record(id, variantSchema),
+    /** UTM rules (1.3.0, D75), in dashboard order. Absent = no rules. */
+    rules: z.array(ruleReaderSchema).max(MAX_RULES_PER_BUNDLE).optional(),
   })
   .superRefine((b, ctx) => {
     const issue = (message: string, path: (string | number)[]) =>
@@ -79,6 +82,23 @@ export const bundlePayloadSchema = z
           issue(`variant ${v.id} belongs to ${def.exp}`, ["variants", v.id, "exp"]);
       }
     }
+
+    const ruleIds = new Set<string>();
+    const perExp = new Map<string, number>();
+    b.rules?.forEach((r, i) => {
+      const path = ["rules", i];
+      if (ruleIds.has(r.id)) issue(`duplicate rule id ${r.id}`, [...path, "id"]);
+      ruleIds.add(r.id);
+      const n = (perExp.get(r.exp) ?? 0) + 1;
+      perExp.set(r.exp, n);
+      if (n === MAX_RULES_PER_EXPERIMENT + 1)
+        issue(`more than ${MAX_RULES_PER_EXPERIMENT} rules for ${r.exp}`, path);
+      const e = b.routing.experiments[r.exp];
+      if (!e) issue(`unknown experiment ${r.exp}`, [...path, "exp"]);
+      else if (e.status !== "running") issue(`experiment ${r.exp} isn't running`, [...path, "exp"]);
+      else if (!e.variants.some((v) => v.id === r.var) || b.variants[r.var]?.exp !== r.exp)
+        issue(`variant ${r.var} isn't a variant of ${r.exp}`, [...path, "var"]);
+    });
   });
 
 export type BundlePayload = z.infer<typeof bundlePayloadSchema>;
@@ -89,7 +109,26 @@ export function parseBundlePayload(input: unknown) {
   return bundlePayloadSchema.safeParse(input);
 }
 
-/** sha256 of the canonical serving content (routing + variants). Ignores ver/iat/exp. */
+export type BundleRule = NonNullable<BundlePayload["rules"]>[number];
+
+/**
+ * sha256 of the canonical serving content (routing + variants): the signed
+ * `hash` field every reader verifies. Ignores ver/iat/exp. It does not cover
+ * `rules`: readers before 1.3.0 recompute it from routing + variants only, so
+ * including rules would make them reject the bundle. The JWS signature covers
+ * the rules; {@link computeContentHash} tells whether content changed.
+ */
 export function computeBundleHash(b: Pick<BundlePayload, "routing" | "variants">): string {
   return sha256Hex(canonicalJson({ routing: b.routing, variants: b.variants }));
+}
+
+/**
+ * Change detection for publishers (D75): equals {@link computeBundleHash} for a
+ * bundle without `rules`, and also covers `rules` when the field is present.
+ */
+export function computeContentHash(
+  b: Pick<BundlePayload, "routing" | "variants"> & { rules?: unknown },
+): string {
+  if (b.rules === undefined) return computeBundleHash(b);
+  return sha256Hex(canonicalJson({ routing: b.routing, variants: b.variants, rules: b.rules }));
 }

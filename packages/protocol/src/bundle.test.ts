@@ -29,11 +29,11 @@ describe("bundle payload", () => {
 
   it("tolerates unknown fields (forward compatible)", () => {
     const b = sampleBundle() as Record<string, unknown>;
-    b.rules = [{ utm: "x" }];
+    b.later = [{ utm: "x" }];
     (b.routing as Record<string, unknown>).future = true;
     const r = parseBundlePayload(b);
     expect(r.success).toBe(true);
-    expect(r.success && (r.data as Record<string, unknown>).rules).toEqual([{ utm: "x" }]);
+    expect(r.success && (r.data as Record<string, unknown>).later).toEqual([{ utm: "x" }]);
   });
 
   const invalid: [string, (b: ReturnType<typeof sampleBundle>) => void][] = [

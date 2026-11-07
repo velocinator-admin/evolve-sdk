@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "fast-check": "^4.10.2",
-    "protocol-1.0.0": "npm:@next-evolve/protocol@1.0.0"
+    "protocol-1.0.0": "npm:@next-evolve/protocol@1.0.0",
+    "protocol-1.2.0": "npm:@next-evolve/protocol@1.2.0"
   }
 }

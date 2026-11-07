@@ -3,15 +3,23 @@ import {
   aggregateRequestSchema as aggregateRequestSchema100,
   aggregateResponseSchema as aggregateResponseSchema100,
 } from "protocol-1.0.0";
+import {
+  bundlePayloadSchema as bundlePayloadSchema120,
+  createKeyRing as createKeyRing120,
+  verifyBundle as verifyBundle120,
+} from "protocol-1.2.0";
 import { describe, expect, it } from "vitest";
 import { aggregateRequestSchema, aggregateResponseSchema } from "./aggregate";
 import { bundlePayloadSchema, computeBundleHash } from "./bundle";
+import { BUNDLE_TYP } from "./keys";
 import { aggregatePullSchema } from "./pull";
 import { syncWebhookSchema } from "./sync";
+import { generateTestKeyPair, signJws } from "./testing";
 import { SUPPORTED_PROTOCOLS } from "./version";
 
 const schemas = {
   "bundle-payload": bundlePayloadSchema,
+  "bundle-payload-rules": bundlePayloadSchema,
   "webhook-bundle-updated": syncWebhookSchema,
   "webhook-ping": syncWebhookSchema,
   "aggregate-request": aggregateRequestSchema,
@@ -79,5 +87,46 @@ describe("compatibility with @next-evolve/protocol 1.0.0", () => {
       expect(vitals, name).toBeDefined();
       expect(rest, name).toEqual(JSON.parse(read(oldDir, `${name}.json`)));
     }
+  });
+});
+
+// Protocol 1.3.0 adds UTM rules (D75). Readers before it (SDK 0.7.x) keep the
+// field and ignore it; the signed `hash` still covers routing + variants only,
+// so they verify a bundle with rules and serve its normal assignment.
+describe("compatibility with @next-evolve/protocol 1.2.0", () => {
+  const dir = new URL("../fixtures/v1/", import.meta.url);
+  const oldDir = new URL("../node_modules/protocol-1.2.0/fixtures/v1/", import.meta.url);
+  const read = (d: URL, f: string) => readFileSync(new URL(f, d), "utf8");
+  const rules = JSON.parse(read(dir, "bundle-payload-rules.json"));
+
+  it("every 1.2.0 fixture is byte-identical", () => {
+    const old = readdirSync(oldDir).filter((f) => f.endsWith(".json"));
+    expect(old.length).toBe(8);
+    for (const f of old) expect(read(dir, f), f).toBe(read(oldDir, f));
+  });
+
+  it("1.2.0's schema parses the rules fixture (loose)", () => {
+    const r = bundlePayloadSchema120.safeParse(rules);
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+  });
+
+  it("the rules fixture is the 1.2.0 bundle plus `rules` (and its own ver)", () => {
+    const { rules: rs, ver, ...rest } = rules;
+    expect(rs.length).toBeGreaterThan(0);
+    const { ver: _v, ...old } = JSON.parse(read(oldDir, "bundle-payload.json"));
+    expect(ver).toBe(13);
+    expect(rest).toEqual(old);
+  });
+
+  it("1.2.0's verifyBundle accepts a signed bundle with rules", () => {
+    const k = generateTestKeyPair("k1");
+    const now = rules.iat + 60;
+    const token = signJws(rules, { ...k, typ: BUNDLE_TYP });
+    const r = verifyBundle120(token, {
+      keys: createKeyRing120({ k1: k.publicKey }),
+      site: rules.site,
+      now,
+    });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
   });
 });

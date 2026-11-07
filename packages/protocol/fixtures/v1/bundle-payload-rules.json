@@ -1,0 +1,136 @@
+{
+  "pv": 1,
+  "site": "site_ab12cd34ef",
+  "ver": 13,
+  "iat": 1795000000,
+  "exp": 1796209600,
+  "hash": "4f520002eb725a73f8fbe2391a740002e5188189df30b3ad05440ce5292d8b28",
+  "routing": {
+    "routes": {
+      "/": ["k3j9x2"],
+      "/pricing": ["k3j9x2", "p7q8r9"]
+    },
+    "experiments": {
+      "k3j9x2": {
+        "status": "running",
+        "traffic": 0.8,
+        "control": "a8f2l1",
+        "variants": [
+          {
+            "id": "a8f2l1",
+            "w": 0.34
+          },
+          {
+            "id": "c1d2e3",
+            "w": 0.33
+          },
+          {
+            "id": "f4g5h6",
+            "w": 0.33
+          }
+        ]
+      },
+      "p7q8r9": {
+        "status": "completed",
+        "traffic": 1,
+        "control": "m1n2o3",
+        "winner": "s4t5u6",
+        "variants": [
+          {
+            "id": "m1n2o3",
+            "w": 0.5
+          },
+          {
+            "id": "s4t5u6",
+            "w": 0.5
+          }
+        ]
+      }
+    }
+  },
+  "variants": {
+    "a8f2l1": {
+      "exp": "k3j9x2",
+      "region": "hero",
+      "ctrl": true,
+      "props": {}
+    },
+    "c1d2e3": {
+      "exp": "k3j9x2",
+      "region": "hero",
+      "ctrl": false,
+      "props": {
+        "title": "Ship 10x faster"
+      }
+    },
+    "f4g5h6": {
+      "exp": "k3j9x2",
+      "region": "hero",
+      "ctrl": false,
+      "props": {
+        "title": "Launch today",
+        "cta": "Try it"
+      }
+    },
+    "m1n2o3": {
+      "exp": "p7q8r9",
+      "region": "pricing-cta",
+      "ctrl": true,
+      "props": {}
+    },
+    "s4t5u6": {
+      "exp": "p7q8r9",
+      "region": "pricing-cta",
+      "ctrl": false,
+      "props": {
+        "label": "Start free trial"
+      }
+    }
+  },
+  "rules": [
+    {
+      "id": "r1s2t3",
+      "exp": "k3j9x2",
+      "var": "c1d2e3",
+      "when": [
+        {
+          "f": "utm_campaign",
+          "op": "eq",
+          "v": "spring-sale"
+        }
+      ]
+    },
+    {
+      "id": "u4v5w6",
+      "exp": "k3j9x2",
+      "var": "f4g5h6",
+      "when": [
+        {
+          "f": "ref",
+          "op": "in",
+          "v": ["news.ycombinator.com", "reddit.com"]
+        },
+        {
+          "f": "device",
+          "op": "eq",
+          "v": "mobile"
+        },
+        {
+          "f": "country",
+          "op": "in",
+          "v": ["US", "CA"]
+        },
+        {
+          "f": "utm_source",
+          "op": "re",
+          "v": "^(hn|reddit)"
+        },
+        {
+          "f": "utm_medium",
+          "op": "prefix",
+          "v": "social"
+        }
+      ]
+    }
+  ]
+}
