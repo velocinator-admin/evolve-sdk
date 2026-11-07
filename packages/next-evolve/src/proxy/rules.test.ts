@@ -201,3 +201,55 @@ describe("rule budget (D76)", () => {
     expect(times[Math.floor(times.length * 0.95)]).toBeLessThan(1 * SLACK);
   });
 });
+
+describe("pattern routes in the proxy (D77)", () => {
+  const cfg = defineConfig({
+    routes: {
+      "/lp/:slug": { mode: "static" },
+      "/docs/:path*": { mode: "dynamic" },
+      "/pricing": { mode: "static" },
+    },
+  });
+  const store = storeWith((b) => {
+    b.routing.routes = {
+      "/lp/:slug": ["k3j9x2"],
+      "/lp/special": ["p7q8r9"],
+      "/docs/:path*": ["k3j9x2"],
+    };
+  });
+  const go = (path: string, random = 0.9) =>
+    applyEvolve(cfg, request(path), event, { store, random: () => random });
+
+  it("serves the pattern's experiment on every matching path, rewriting the real path", () => {
+    expect(rewritten(go("/lp/a"))).toBe("/ev_k3j9x2-c1d2e3/lp/a");
+    expect(rewritten(go("/lp/b"))).toBe("/ev_k3j9x2-c1d2e3/lp/b");
+  });
+
+  it("an exact bundle route wins over the pattern", () => {
+    expect(rewritten(go("/lp/special"))).toBe("/ev_p7q8r9~s4t5u6/lp/special");
+  });
+
+  it("paths outside the pattern aren't Evolve routes", () => {
+    expect(go("/lp/a/b")).toBeNull();
+    expect(go("/lp")).toBeNull();
+  });
+
+  it("an exact config route with no bundle route serves control", () => {
+    expect(rewritten(go("/pricing"))).toBe("/ev_0/pricing");
+  });
+
+  it("dynamic mode passes the route pattern as the region path", () => {
+    const res = go("/docs/a/b")!;
+    expect(res.headers.get("x-middleware-request-x-evolve-a")).toBe("ev_k3j9x2-c1d2e3");
+    expect(res.headers.get("x-middleware-request-x-evolve-path")).toBe("/docs/:path*");
+  });
+
+  it("rejects malformed patterns in the config", () => {
+    expect(() => defineConfig({ routes: { "/lp/:p*/x": { mode: "static" } } })).toThrow(
+      /last segment/,
+    );
+    expect(() => defineConfig({ routes: { "/lp/[slug]": { mode: "static" } } })).toThrow(
+      /path or a pattern/,
+    );
+  });
+});

@@ -20,6 +20,7 @@ import {
   serializeAssignments,
 } from "../core/cookies";
 import { logRateLimited } from "../core/log";
+import { bundleRoutes } from "../core/routes";
 import { RULE_COOKIE, requestFacts, resolveRules } from "../core/rules";
 import { onDemand } from "../store/on-demand";
 import { coldStart, getBundleStore, getSiteIdentity, type RuntimeOptions } from "../store/runtime";
@@ -59,9 +60,11 @@ export function applyEvolve(
     return null;
   }
   const path = normalizePath(pathname);
-  const route = cfg.routes.get(path);
-  if (!route) return null;
-  const isStatic = route.mode === "static";
+  const hit = cfg.route.match(path);
+  if (!hit) return null;
+  // The config's route key: the path itself, or a pattern like /lp/:slug (D77).
+  const routeKey = hit.key;
+  const isStatic = hit.value.mode === "static";
 
   let res: NextResponse;
   let routed = false;
@@ -98,13 +101,15 @@ export function applyEvolve(
       }
       const known = req.cookies.get(ANON_COOKIE)?.value;
       const anon = known || newAnonId();
-      const exps = bundle.routing.routes[path] ?? [];
+      // Bundle routes: an exact path wins, then the most specific pattern.
+      const bundleKey = bundleRoutes(bundle).match(path)?.key ?? path;
+      const exps = bundle.routing.routes[bundleKey] ?? [];
       // UTM rules (D76): a still-valid rule from this session, else the first match.
       const rules = resolveRules(bundle, exps, req.cookies.get(RULE_COOKIE)?.value, () =>
         requestFacts(req.nextUrl, req.headers, cfg.geoHeader),
       );
       ruled = rules.forced.size > 0;
-      const a = assign(bundle, path, cookie, opts.random ?? visitorDraw(anon), rules.forced);
+      const a = assign(bundle, bundleKey, cookie, opts.random ?? visitorDraw(anon), rules.forced);
       code = encodeCode(a.pairs);
       const running = exps.some((e) => bundle.routing.experiments[e]?.status === "running");
       if (running) {
@@ -118,9 +123,9 @@ export function applyEvolve(
     // rewritten by next.config from the cookie, without invoking the proxy.
     // Not for a rule render: the session's rule lives in `evolve_r`, so later
     // views must keep going through the proxy.
-    if (routed && !ruled && isStatic && cfg.cdnRouting)
-      setCookies.push([cdnCookieName(path), code, false, cfg.cdnRouting.maxAgeSeconds]);
-    res = isStatic ? rewrite(req, code, path) : passThrough(req, code, path);
+    if (routed && !ruled && isStatic && cfg.cdnRouting && routeKey === path)
+      setCookies.push([cdnCookieName(routeKey), code, false, cfg.cdnRouting.maxAgeSeconds]);
+    res = isStatic ? rewrite(req, code, path) : passThrough(req, code, routeKey);
     if (setCookies.length) {
       const secure =
         (req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", "")) === "https";
@@ -138,7 +143,7 @@ export function applyEvolve(
     }
   } catch (e) {
     logRateLimited("proxy", "proxy error; serving control", e);
-    res = isStatic ? rewrite(req, CONTROL_CODE, path) : passThrough(req, CONTROL_CODE, path);
+    res = isStatic ? rewrite(req, CONTROL_CODE, path) : passThrough(req, CONTROL_CODE, routeKey);
   }
   // Off Vercel, a shared CDN in front of the app could cache one visitor's
   // variant for everyone. Vercel's cache keys on the rewritten path.
@@ -162,10 +167,11 @@ function rewrite(req: NextRequest, code: string, path: string): NextResponse {
   return NextResponse.rewrite(new URL(target + req.nextUrl.search, req.url));
 }
 
-function passThrough(req: NextRequest, code: string, path: string): NextResponse {
+/** `routeKey` (the route as configured, e.g. `/lp/:slug`) is what regions register under. */
+function passThrough(req: NextRequest, code: string, routeKey: string): NextResponse {
   const headers = new Headers(req.headers);
   headers.set(HEADER_CODE, code);
-  headers.set(HEADER_PATH, path);
+  headers.set(HEADER_PATH, routeKey);
   return NextResponse.next({ request: { headers } });
 }
 

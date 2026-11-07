@@ -101,6 +101,43 @@ const failing = (checks: Check[]) =>
   checks.filter((c) => c.status !== "ok").map((c) => `${c.status} ${c.name}: ${c.detail}`);
 
 describe("next-evolve doctor (spec §16.2)", () => {
+  it("a pattern route set up by init passes (D77): page under app/[evolve]/lp/[slug], pattern in the matcher", async () => {
+    const dir = freshApp({
+      "app/lp/[slug]/page.tsx": "export default function L() {\n  return null;\n}\n",
+    });
+    const code = await initCommand(
+      [
+        "--key",
+        TEST_SECRET_KEY,
+        "--webhook-secret",
+        TEST_WEBHOOK_SECRET,
+        "--yes",
+        "--routes",
+        "/ /lp/:slug",
+      ],
+      {
+        env: { EVOLVE_CLOUD_URL: cloud.url, EVOLVE_UNSAFE_TEST_PUBLIC_KEY: TEST_PUBLIC_KEY_ENV },
+        cwd: dir,
+        out: () => {},
+        err: () => {},
+        ask: null,
+        setupDb: async () => ({ ok: true, applied: [] }),
+        push: async () => 0,
+        run: async () => 0,
+      },
+    );
+    expect(code).toBe(0);
+    const config = {
+      routes: { "/": { mode: "static" }, "/lp/:slug": { mode: "static" } },
+    } as EvolveConfig;
+    const checks = await doctor(dir, { load: async () => ({ config }) });
+    expect(failing(checks)).toEqual([]);
+    rmSync(join(dir, "app/[evolve]/lp/[slug]/page.tsx"));
+    expect(by(await doctor(dir, { load: async () => ({ config }) }), "Pages").detail).toMatch(
+      /\/lp\/:slug: no app\/\[evolve\]\/lp\/\[slug\]\/page/,
+    );
+  });
+
   it("a set-up app passes every check", async () => {
     const dir = await healthy();
     const checks = await doctor(dir);

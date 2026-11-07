@@ -29,7 +29,7 @@ import { TEST_KEY, TEST_SITE, TEST_WEBHOOK_SECRET } from "./keys";
 export * from "./keys";
 
 /** What a test publishes: serving content only. The fake cloud fills pv, ver, iat, exp, hash. */
-export type PublishInput = Pick<BundlePayload, "site" | "routing" | "variants"> & {
+export type PublishInput = Pick<BundlePayload, "site" | "routing" | "variants" | "rules"> & {
   ver?: number;
   /** Override timestamps (unix seconds), e.g. to publish an already-expired bundle. */
   iat?: number;
@@ -313,6 +313,7 @@ export async function startFakeCloud(
     const iat = input.iat ?? Math.floor(Date.now() / 1000);
     const content = { routing: input.routing, variants: input.variants };
     const payload: BundlePayload = {
+      ...(input.rules ? { rules: input.rules } : {}),
       pv: PROTOCOL_VERSION,
       site: input.site,
       ver: input.ver ?? (prev ? prev.ver + 1 : 1),

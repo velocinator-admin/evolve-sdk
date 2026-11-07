@@ -62,4 +62,16 @@ describe("evolveMetadata", () => {
       alternates: { canonical: "/pricing" },
     });
   });
+
+  it("a pattern route's canonical is the page's own path (D77)", async () => {
+    const lp = evolveMetadata("/lp/:slug");
+    const at = (p: Record<string, string | string[]>) =>
+      lp({ params: Promise.resolve({ evolve: "ev_0", ...p }) });
+    expect((await at({ slug: "spring sale" })).alternates?.canonical).toBe("/lp/spring%20sale");
+    const docs = evolveMetadata("/docs/:path*");
+    const d = (p: Record<string, string | string[]>) =>
+      docs({ params: Promise.resolve({ evolve: "ev_0", ...p }) });
+    expect((await d({ path: ["a", "b"] })).alternates?.canonical).toBe("/docs/a/b");
+    expect((await d({})).alternates?.canonical).toBe("/docs");
+  });
 });

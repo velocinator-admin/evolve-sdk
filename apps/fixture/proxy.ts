@@ -34,6 +34,7 @@ export const config = {
     { source: "/pricing", has: [{ type: "query", key: "evolve_preview" }] },
     "/features",
     "/slow",
+    "/lp/:slug",
     "/(ev_.*)",
   ],
 };

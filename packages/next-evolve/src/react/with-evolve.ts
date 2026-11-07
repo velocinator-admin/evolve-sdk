@@ -46,6 +46,16 @@ export function evolveStaticParams(): { evolve: string }[] {
   return [{ evolve: CONTROL_CODE }];
 }
 
+/** `/lp/:slug` + `{ slug: "a" }` → `/lp/a`; catch-alls join their segments. */
+function fillPattern(route: string, params: Record<string, string | string[] | undefined>): string {
+  const out = route.replace(/\/:([A-Za-z_][A-Za-z0-9_]*)([*+])?/g, (_m, name: string) => {
+    const v = params[name];
+    const segs = Array.isArray(v) ? v : v === undefined ? [] : [v];
+    return segs.map((x) => `/${encodeURIComponent(x)}`).join("");
+  });
+  return out || "/";
+}
+
 type MetadataInput = Metadata | ((props: EvolvePageProps) => Metadata | Promise<Metadata>);
 
 /**
@@ -54,9 +64,11 @@ type MetadataInput = Metadata | ((props: EvolvePageProps) => Metadata | Promise<
  * control anyway).
  */
 export function evolveMetadata(path: string, base: MetadataInput = {}) {
-  const canonical = normalizePath(path);
+  const route = normalizePath(path);
   return async function generateMetadata(props: EvolvePageProps): Promise<Metadata> {
     const code = await readCode(props.params);
+    // A pattern route (/lp/:slug) is canonical at the page's own path.
+    const canonical = route.includes("/:") ? fillPattern(route, await props.params) : route;
     const m = typeof base === "function" ? await base(props) : base;
     return {
       ...m,

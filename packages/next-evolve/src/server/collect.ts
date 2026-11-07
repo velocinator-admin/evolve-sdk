@@ -10,6 +10,7 @@ import { z } from "zod";
 import { normalizePath, type ResolvedConfig } from "../config/config";
 import { type Goals, matchesPageviewGoal } from "../config/goals";
 import { ANON_COOKIE, PREVIEW_COOKIE } from "../core/cookies";
+import { bundleRoutes } from "../core/routes";
 import { compileRules, parseRuleCookie, RULE_COOKIE, sessionRule } from "../core/rules";
 import type { EventRow, ExposureRow, VitalsRow, Writer } from "../db/writer";
 import { eventRow, utcDay } from "./events";
@@ -191,10 +192,11 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
       }
       case "pv": {
         const p = normalizePath(e.p);
-        const running = (bundle?.routing.routes[p] ?? []).some(
+        const key = bundle ? bundleRoutes(bundle).match(p)?.key : undefined;
+        const running = (key ? bundle!.routing.routes[key]! : []).some(
           (id) => bundle?.routing.experiments[id]?.status === "running",
         );
-        if (running && deps.config.routes.has(p)) testedPageviews++;
+        if (running && deps.config.route.match(p)) testedPageviews++;
         if (matchesPageviewGoal(deps.goals, p)) {
           const row = eventRow("$pageview", { anonId: anon, path: p }, undefined, "browser", now);
           if (row) rows.push(row);

@@ -6,6 +6,7 @@ import { parseSecretKey, verifyBundle } from "@next-evolve/protocol";
 import { evolveMatcher } from "../config/cdn";
 import { type EvolveConfig, normalizePath, resolveConfig } from "../config/config";
 import { trustedKeys } from "../core/keys";
+import { routeDir } from "../core/routes";
 import { createSql } from "../db/client";
 import { loadMigrations } from "../db/migrate";
 import { fetchBundle, isSiteDeleted } from "../store/fetch";
@@ -273,7 +274,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
     if (statics.length && clash)
       problems.push(`${app}/${clash} conflicts with ${app}/[evolve]; use "dynamic" mode`);
     for (const r of statics) {
-      const seg = r.path === "/" ? "" : r.path;
+      const seg = r.path === "/" ? "" : `/${routeDir(r.path)}`;
       const page = ["tsx", "jsx", "ts", "js"]
         .map((e) => `${app}/[evolve]${seg}/page.${e}`)
         .find((f) => existsSync(join(cwd, f)));

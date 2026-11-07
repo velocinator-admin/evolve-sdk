@@ -19,7 +19,7 @@ test("manifest and regions reach the cloud", async ({ request }) => {
         timeout: 10_000,
       },
     )
-    .toEqual(["/", "/features", "/pricing", "/slow"]);
+    .toEqual(["/", "/features", "/lp/:slug", "/pricing", "/slow"]);
   const m = (await state(request)).manifests[TEST_SITE];
   expect(Object.keys(m?.goals ?? {}).length).toBeGreaterThan(0);
 

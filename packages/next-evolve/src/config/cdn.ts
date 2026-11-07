@@ -34,11 +34,17 @@ type Has =
   | { type: "cookie"; key: string; value?: string }
   | { type: "query"; key: string; value?: string };
 
-/** Routes that take the CDN fast path: static mode, with `cdnRouting` on. */
+/**
+ * Routes that take the CDN fast path: static mode, with `cdnRouting` on.
+ * Pattern routes (`/lp/:slug`) always run the proxy: one route cookie would
+ * span paths whose bundle routes can differ.
+ */
 function cdnRoutes(config: EvolveConfig): string[] {
   const cfg = resolveConfig(config);
   if (!cfg.cdnRouting) return [];
-  return [...cfg.routes].filter(([, r]) => r.mode === "static").map(([p]) => p);
+  return [...cfg.routes]
+    .filter(([p, r]) => r.mode === "static" && !p.includes("/:"))
+    .map(([p]) => p);
 }
 
 const previewMissing: Has[] = [

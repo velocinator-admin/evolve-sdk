@@ -159,3 +159,27 @@ describe("evolveRewrites (Next's own rewrite semantics)", () => {
     expect(await resolve("https://acme.test/", { [rootCookie]: CODE, evolve_pv: "x" })).toBeNull();
   });
 });
+
+describe("pattern routes (D77)", () => {
+  const pat = defineConfig({
+    routes: { "/": { mode: "static" }, "/lp/:slug": { mode: "static" } },
+    cdnRouting: true,
+  });
+
+  it("the matcher emits the pattern; pattern routes never take the CDN fast path", () => {
+    const m = evolveMatcher(pat);
+    expect(m).toContain("/lp/:slug");
+    expect(evolveRewrites(pat).map((r) => r.source)).toEqual(["/"]);
+    const config = { matcher: m } as never;
+    expect(doesProxyMatch({ config, url: "/lp/a" })).toBe(true);
+    expect(doesProxyMatch({ config, url: "/lp/b" })).toBe(true);
+    expect(doesProxyMatch({ config, url: "/lp/a/b" })).toBe(false);
+  });
+
+  it("without cdnRouting the matcher is the plain list with the pattern", () => {
+    expect(evolveMatcher(defineConfig({ routes: { "/lp/:slug": { mode: "static" } } }))).toEqual([
+      "/lp/:slug",
+      "/(ev_.*)",
+    ]);
+  });
+});

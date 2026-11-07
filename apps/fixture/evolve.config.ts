@@ -7,6 +7,8 @@ export default defineConfig({
     "/features": { mode: "dynamic" },
     // Fixture-only: Core Web Vitals e2e (T17.4).
     "/slow": { mode: "dynamic" },
+    // T21.1: pattern route (app/[evolve]/lp/[slug]).
+    "/lp/:slug": { mode: "static" },
   },
   // e2e runs poll fast so a publish shows up quickly.
   sync: { pollSeconds: Number(process.env.EVOLVE_POLL_SECONDS ?? 60) },

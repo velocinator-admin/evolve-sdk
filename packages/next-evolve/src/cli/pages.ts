@@ -6,6 +6,7 @@ import { readdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, posix } from "node:path";
 import type * as TS from "typescript";
+import { routeDir } from "../core/routes";
 import type { Detection } from "./detect";
 import { addImport, type RouteMode } from "./files";
 import type { Plan } from "./plan";
@@ -80,7 +81,8 @@ export function planPages(plan: Plan, d: Detection, routes: RouteMode[]): RouteM
         `${app}/${dynamicRoot} conflicts with ${app}/[evolve] (static mode needs the top-level dynamic segment); "dynamic" mode works`,
       );
     }
-    const seg = r.path.replace(/^\/|\/$/g, "");
+    // A pattern route's page lives in the matching dynamic folder: /lp/:slug → lp/[slug].
+    const seg = routeDir(r.path.replace(/\/$/, "") || "/");
     const from = seg ? `${app}/${seg}` : app;
     const to = seg ? `${app}/[evolve]/${seg}` : `${app}/[evolve]`;
     const pageName = PAGE_EXTS.map((e) => `page.${e}`).find((f) => plan.exists(`${from}/${f}`));

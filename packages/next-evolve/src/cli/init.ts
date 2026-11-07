@@ -4,6 +4,7 @@
 // diff and changes nothing (no install, no migration, no cloud writes).
 import { spawn } from "node:child_process";
 import { parseSecretKey, WEBHOOK_SECRET_RE } from "@next-evolve/protocol";
+import { compilePattern, isPattern } from "../core/routes";
 import { createSql } from "../db/client";
 import { migrate } from "../db/migrate";
 import { parseFlags } from "./args";
@@ -112,8 +113,11 @@ export async function initCommand(args: string[], deps: InitDeps): Promise<numbe
     return 1;
   }
   const paths = (f.routes ?? "/").split(/[\s,]+/).filter(Boolean);
-  if (paths.some((r) => !r.startsWith("/") || /[[\]*?#]/.test(r))) {
-    err('next-evolve init: --routes are concrete paths like "/ /pricing"');
+  const badRoute = (r: string) =>
+    !r.startsWith("/") ||
+    (isPattern(r) ? typeof compilePattern(r) === "string" : /[[\]*?#:]/.test(r));
+  if (paths.some(badRoute)) {
+    err('next-evolve init: --routes are paths or patterns like "/ /pricing /lp/:slug"');
     return 1;
   }
 

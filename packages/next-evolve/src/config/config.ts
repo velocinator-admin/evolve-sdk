@@ -1,10 +1,14 @@
+import { compilePattern, isPattern, type RouteTable, routeTable } from "../core/routes";
 export type RouteConfig = {
   /** static (default): ISR per variant under `app/[evolve]/`. dynamic: page reads `x-evolve-a`. */
   mode: "static" | "dynamic";
 };
 
 export type EvolveConfig = {
-  /** Routes Evolve may test, keyed by exact pathname (e.g. "/", "/pricing"). */
+  /**
+   * Routes Evolve may test, keyed by pathname (e.g. "/", "/pricing") or, since
+   * 0.8, a pattern (`/lp/:slug`, `/docs/:path*`). An exact path wins over a pattern.
+   */
   routes: Record<string, RouteConfig>;
   store?: "auto" | "memory" | "global-config";
   sync?: { pollSeconds?: number };
@@ -46,6 +50,8 @@ export type EvolveConfig = {
 
 export type ResolvedConfig = {
   routes: ReadonlyMap<string, RouteConfig>;
+  /** Route lookup for a normalized pathname: exact, then the most specific pattern. */
+  route: RouteTable<RouteConfig>;
   store: "auto" | "memory" | "global-config";
   pollSeconds: number;
   databaseUrlEnv: string;
@@ -86,7 +92,11 @@ export function resolveConfig(config: EvolveConfig): ResolvedConfig {
     const path = normalizePath(raw);
     if (path.split("/")[1]?.startsWith("ev_"))
       throw new Error(`[evolve] route "${raw}" can't start with ev_`);
-    if (/[[\]*?#]/.test(path)) throw new Error(`[evolve] route "${raw}" must be a concrete path`);
+    if (isPattern(path)) {
+      const p = compilePattern(path);
+      if (typeof p === "string") throw new Error(`[evolve] route "${raw}": ${p}`);
+    } else if (/[[\]*?#:]/.test(path))
+      throw new Error(`[evolve] route "${raw}" must be a path or a pattern like /lp/:slug`);
     if (route.mode !== "static" && route.mode !== "dynamic") {
       throw new Error(`[evolve] route "${raw}": mode must be "static" or "dynamic"`);
     }
@@ -122,6 +132,7 @@ export function resolveConfig(config: EvolveConfig): ResolvedConfig {
   }
   const r: ResolvedConfig = {
     routes,
+    route: routeTable(routes),
     store: config.store ?? "auto",
     pollSeconds,
     databaseUrlEnv: config.database?.urlEnv ?? "EVOLVE_DATABASE_URL",

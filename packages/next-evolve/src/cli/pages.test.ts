@@ -20,6 +20,29 @@ function setup(files: Record<string, string>, paths: string[]) {
 const modes = (rs: RouteMode[]) => Object.fromEntries(rs.map((r) => [r.path, r.mode]));
 
 describe("static-mode page move (spec §16.1 step 7)", () => {
+  it("pattern route: app/lp/[slug] moves to app/[evolve]/lp/[slug] (D77)", () => {
+    const { plan, out } = setup(
+      {
+        "app/lp/[slug]/page.tsx": `export default async function Landing({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  return <p>{slug}</p>;
+}
+`,
+        "app/docs/[[...path]]/page.tsx":
+          "export default function Docs() {\n  return <p>docs</p>;\n}\n",
+      },
+      ["/lp/:slug", "/docs/:path*"],
+    );
+    expect(modes(out)).toEqual({ "/lp/:slug": "static", "/docs/:path*": "static" });
+    expect(plan.read("app/lp/[slug]/page.tsx")).toBeNull();
+    const page = plan.read("app/[evolve]/lp/[slug]/page.tsx")!;
+    expect(page).toContain('export default withEvolve(Landing, { path: "/lp/:slug" });');
+    expect(page).toContain('export const generateMetadata = evolveMetadata("/lp/:slug");');
+    expect(plan.read("app/[evolve]/docs/[[...path]]/page.tsx")).toContain(
+      'withEvolve(Docs, { path: "/docs/:path*" })',
+    );
+  });
+
   it("plain page: moved under [evolve], wrapped, params and metadata exported", () => {
     const { plan, out } = setup(
       {

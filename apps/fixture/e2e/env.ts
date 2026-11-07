@@ -89,8 +89,19 @@ export const M1_BUNDLE = {
       "/pricing": ["p7q8r9"],
       "/features": ["f5e6a7"],
       "/slow": ["s1ow01"],
+      // T21.1: a pattern route (D77); every /lp/<slug> serves it.
+      "/lp/:slug": ["l1p2a3"],
     },
     experiments: {
+      l1p2a3: {
+        status: "running",
+        traffic: 1,
+        control: "lc0000",
+        variants: [
+          { id: "lc0000", w: 0 },
+          { id: "ld0000", w: 1 },
+        ],
+      },
       k3j9x2: {
         status: "running",
         traffic: 1,
@@ -153,7 +164,18 @@ export const M1_BUNDLE = {
       ctrl: false,
       props: { label: "Start free trial" },
     },
+    lc0000: { exp: "l1p2a3", region: "lp-hero", ctrl: true, props: {} },
+    ld0000: { exp: "l1p2a3", region: "lp-hero", ctrl: false, props: { title: "Landing variant" } },
   },
+  // T20.2: UTM rule (D75): spring-sale visitors on /pricing see the trial CTA.
+  rules: [
+    {
+      id: "r1s2t3",
+      exp: "p7q8r9",
+      var: "s4t5u6",
+      when: [{ f: "utm_campaign", op: "eq", v: "spring-sale" }],
+    },
+  ],
 };
 
 /**
