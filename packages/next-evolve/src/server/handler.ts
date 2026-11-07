@@ -10,7 +10,7 @@ import { onDemand } from "../store/on-demand";
 import { getBundleStore } from "../store/runtime";
 import { handleAggregate } from "./aggregate-route";
 import { handleCollect } from "./collect";
-import { backgroundTask, runtimeWriter, scheduleFlush, setRuntime } from "./runtime";
+import { afterResponse, backgroundTask, runtimeWriter, scheduleFlush, setRuntime } from "./runtime";
 import { handleSync, revalidateBundle } from "./sync-route";
 import { handleTrack } from "./track-route";
 
@@ -56,11 +56,20 @@ export function createEvolveHandler(opts: EvolveHandlerOptions) {
           // The poll peek() may start must finish before a serverless instance
           // is frozen, or the fetch hangs until it thaws (T19.5).
           const waitUntil = await backgroundTask();
+          const later = await afterResponse();
           const status = await handleCollect(req, {
             config: cfg,
             goals: opts.goals,
             bundle: () => store?.peek(waitUntil) ?? null,
             ...(store ? { refreshBundle: onDemand(store).soon } : {}),
+            // T31.1: a batch that waits for a refresh is recorded after the
+            // response, then flushed (serverless; Node flushes on its timer).
+            defer: (task) =>
+              later(() =>
+                task()
+                  .then(() => (writer.mode === "node" ? undefined : writer.flush()))
+                  .catch((e) => logRateLimited("collect", "collect failed", e)),
+              ),
             isBot,
             writer,
           });

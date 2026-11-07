@@ -47,7 +47,7 @@ Per-host setup (Docker standalone, Netlify, Cloudflare in front): [hosting.md](h
 
 "Within one poll interval" means up to ~66 s after an instance's last check, on its next request (that request is still served the old bundle; the fetch runs in the background).
 
-An instance that sees an experiment or variant its bundle doesn't know asks the cloud at once instead of waiting for its poll (since 0.6.1). It sees one when a returning visitor's cookie names it (the proxy refreshes in the background) or when a beacon reports it (collect waits for the refresh, then counts the exposure and its vitals). That also covers a Global Config item that has fallen behind. Each instance makes at most one such fetch per 5 s, shared by the proxy, collect and the render path, so made-up ids can't turn into a cloud fetch each. A failed fetch (network or 5xx) is retried after 10 s instead of a full poll interval.
+An instance that sees an experiment or variant its bundle doesn't know asks the cloud at once instead of waiting for its poll (since 0.6.1). It sees one when a returning visitor's cookie names it (the proxy refreshes in the background) or when a beacon reports it (collect answers the beacon at once, then waits for the refresh after the response and counts the exposure and its vitals). That also covers a Global Config item that has fallen behind. Each instance makes at most one such fetch per 5 s, shared by the proxy, collect and the render path, so made-up ids can't turn into a cloud fetch each. A failed fetch (network or 5xx) is retried after 10 s instead of a full poll interval.
 
 ### Vercel + Global Config (recommended on Vercel)
 
