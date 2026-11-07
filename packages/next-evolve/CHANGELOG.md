@@ -1,5 +1,16 @@
 # next-evolve
 
+## 0.8.0
+
+### Minor Changes
+
+- bf38adf: Static mode works with `cacheComponents: true` (HOST-2): mark the `app/[evolve]/…` page's default export `"use cache"` with a `cacheLife`, and each variant code is cached once (control is prerendered). `doctor` no longer warns about `cacheComponents`; with it on, its Pages check fails a static page that still exports `revalidate`/`dynamicParams` or has no `"use cache"`, and says how to fix it. Docs: the pattern in concepts.md, troubleshooting updated.
+- ee72c49: New `npx next-evolve wrap [route]` (SDK-5): finds the components a page renders, generates a Zod schema from their TypeScript props (strings with a max length, literal unions, numbers, booleans, optional props, primitive arrays; everything else stays a plain prop), writes an `optimizable()` export in a sibling `<file>.evolve.ts` and replaces the usage with `<Optimizable id>`. Interactive picker, `--yes`, `--component`, `--dry-run` and `--build`; the diff is always shown first, and if `tsc` (or `next build`) fails afterwards every file is restored byte-identical. See `docs/wrap.md`.
+
+### Patch Changes
+
+- e1cdf7e: `doctor` requests your live site and names the CDN in front of it from the response headers: Cloudflare (`cf-ray`, `server: cloudflare`) and Netlify warn with what to check, and a tested route served from the CDN's cache (`cf-cache-status: HIT`) fails, since every visitor would get one variant. New docs page `hosting.md`: Docker standalone, Cloudflare cache rules that never serve one variant to everyone, Netlify (beta, unverified).
+
 ## 0.7.1
 
 ### Patch Changes
