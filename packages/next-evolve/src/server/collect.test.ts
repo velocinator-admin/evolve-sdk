@@ -343,3 +343,53 @@ describe("collect: Core Web Vitals (protocol 1.1.0)", () => {
     expect(vitals()).toEqual([]);
   });
 });
+
+describe("collect with UTM rules (D76)", () => {
+  const ruled = () =>
+    sampleBundle((b) => {
+      b.rules = [
+        {
+          id: "r1s2t3",
+          exp: "k3j9x2",
+          var: "c1d2e3",
+          when: [{ f: "utm_campaign", op: "eq", v: "spring-sale" }],
+        },
+      ];
+    });
+
+  it("an exposure of the session rule's variant gets segment = rule id and no vitals", async () => {
+    deps.bundle = ruled;
+    const status = await handleCollect(
+      req(
+        {
+          v: 1,
+          events: [
+            { t: "exp", e: "k3j9x2", v: "c1d2e3", p: "/" },
+            { t: "cwv", m: "lcp", v: 1200, p: "/" },
+          ],
+        },
+        { cookie: `evolve_id=${ANON}; evolve_r=k3j9x2:r1s2t3` },
+      ),
+      deps,
+    );
+    expect(status).toBe(204);
+    expect(w.rows.exposures).toMatchObject([{ variant_id: "c1d2e3", segment: "r1s2t3" }]);
+    expect(w.rows.vitals).toEqual([]);
+  });
+
+  it("without evolve_r, or for another variant, the exposure is main", async () => {
+    deps.bundle = ruled;
+    await handleCollect(
+      req({ v: 1, events: [{ t: "exp", e: "k3j9x2", v: "c1d2e3", p: "/" }] }),
+      deps,
+    );
+    await handleCollect(
+      req(
+        { v: 1, events: [{ t: "exp", e: "k3j9x2", v: "a8f2l1", p: "/" }] },
+        { cookie: `evolve_id=${ANON}; evolve_r=k3j9x2:r1s2t3` },
+      ),
+      deps,
+    );
+    expect(w.rows.exposures.map((r) => r.segment)).toEqual([undefined, undefined]);
+  });
+});

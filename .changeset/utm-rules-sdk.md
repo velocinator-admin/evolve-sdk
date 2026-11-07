@@ -1,0 +1,5 @@
+---
+"next-evolve": minor
+---
+
+UTM rules (UTM-1, protocol 1.3.0). The proxy compiles the bundle's `rules` once per bundle and, per experiment on the route and before the normal assignment, uses a still-valid rule from the session cookie `evolve_r` or the first rule matching the request (`utm_*` query parameters, referrer host, country from the new `geoHeader` option, default `x-vercel-ip-country`, and device class). A match renders the rule's variant with the same variant code as an assigned visitor (one cached page per route and variant) and leaves `evolve_a` alone, so the visitor returns to their arm when the session ends. Bots and visitors without consent still get control, and preview links win over rules. Rules that can't be evaluated (an invalid regex, an unknown field or operator) are skipped. Exposures of a rule's variant during its session are stored with `segment` = the rule id (a visitor already counted in main stays main) and aggregated per segment; rule renders are left out of the Core Web Vitals histograms. With `cdnRouting`, a rule render sets no CDN route cookie. 20 rules evaluate in < 0.2 ms (CI benchmark).

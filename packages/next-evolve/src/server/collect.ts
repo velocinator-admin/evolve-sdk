@@ -10,6 +10,7 @@ import { z } from "zod";
 import { normalizePath, type ResolvedConfig } from "../config/config";
 import { type Goals, matchesPageviewGoal } from "../config/goals";
 import { ANON_COOKIE, PREVIEW_COOKIE } from "../core/cookies";
+import { compileRules, parseRuleCookie, RULE_COOKIE, sessionRule } from "../core/rules";
 import type { EventRow, ExposureRow, VitalsRow, Writer } from "../db/writer";
 import { eventRow, utcDay } from "./events";
 
@@ -149,6 +150,15 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
     }
     clearTimeout(timer);
   }
+  // UTM rules (D76): an exposure of the variant a session rule forces is
+  // counted in that rule's segment. Read at write time, so the variant code
+  // (and the static page cache) stays the same as for a normal assignment.
+  const ruleCookie = parseRuleCookie(cookie(req, RULE_COOKIE));
+  const rules = bundle && ruleCookie.size ? compileRules(bundle) : null;
+  const segmentOf = (e: string, v: string): string | null => {
+    const r = rules ? sessionRule(rules, ruleCookie, e) : null;
+    return r && r.var === v ? r.id : null;
+  };
   const exposures: ExposureRow[] = [];
   const rows: EventRow[] = [];
   /** Known pairs the batch reports per page; vitals for that page count for each of them. */
@@ -162,14 +172,19 @@ export async function handleCollect(req: Request, deps: CollectDeps): Promise<nu
         // Only pairs the local bundle knows about; anything else is noise or forgery.
         if (known(e.e, e.v)) {
           const p = normalizePath(e.p);
-          if (!pairs.has(p)) pairs.set(p, new Map());
-          pairs.get(p)!.set(e.e, e.v);
+          const segment = segmentOf(e.e, e.v);
+          // Vitals histograms have no segment: rule renders stay out of them (main only).
+          if (!segment) {
+            if (!pairs.has(p)) pairs.set(p, new Map());
+            pairs.get(p)!.set(e.e, e.v);
+          }
           exposures.push({
             experiment_id: e.e,
             anon_id: anon,
             variant_id: e.v,
-            path: normalizePath(e.p),
+            path: p,
             first_at: now,
+            ...(segment ? { segment } : {}),
           });
         }
         break;

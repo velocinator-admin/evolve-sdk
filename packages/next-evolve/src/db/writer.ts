@@ -10,6 +10,8 @@ export type ExposureRow = {
   path: string;
   /** When the beacon arrived (same clock as event `ts`), not when the batch is written. */
   first_at: Date;
+  /** UTM rule id for a rule render (D76); null/absent = main. */
+  segment?: string | null;
 };
 export type EventRow = {
   ts: Date;
@@ -109,8 +111,10 @@ export function createWriter(opts: WriterOptions): Writer {
   }
 
   async function write(sql: Sql, batch: Batch) {
-    for (const rows of chunks(batch.exposures)) {
-      await sql`insert into evolve.exposures ${sql(rows, "experiment_id", "anon_id", "variant_id", "path", "first_at")}
+    for (const chunk of chunks(batch.exposures)) {
+      // First exposure wins (primary key): a visitor counted in main stays main.
+      const rows = chunk.map((r) => ({ ...r, segment: r.segment ?? null }));
+      await sql`insert into evolve.exposures ${sql(rows, "experiment_id", "anon_id", "variant_id", "path", "first_at", "segment")}
         on conflict do nothing`;
     }
     for (const rows of chunks(batch.events)) {
