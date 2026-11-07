@@ -83,7 +83,7 @@ describe("detectProject (spec §16.1 step 1)", () => {
     expect(errors(none)[0]).toMatch(/isn't a Next\.js app/);
   });
 
-  it("output: 'export' → error; cacheComponents → warning; bun lockfile", () => {
+  it("output: 'export' → error; cacheComponents detected, no warning (T23.3); bun lockfile", () => {
     const d = detectProject(
       project({
         "package.json": pkg({ next: "16.1.0" }),
@@ -96,6 +96,6 @@ describe("detectProject (spec §16.1 step 1)", () => {
     expect(d.outputExport).toBe(true);
     expect(d.cacheComponents).toBe(true);
     expect(errors(d)).toEqual([expect.stringMatching(/output: "export"/)]);
-    expect(warnings(d)).toEqual([expect.stringMatching(/cacheComponents/)]);
+    expect(warnings(d)).toEqual([]);
   });
 });

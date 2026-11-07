@@ -34,16 +34,39 @@ The bundle is your site's serving configuration: which experiments run on which 
 
 Each route in `evolve.config.ts` has a mode.
 
-|                     | Static (default)                                                         | Dynamic                                                                                       |
-| ------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| Page file           | Moved to `app/[evolve]/<route>/page.tsx` and wrapped with `withEvolve()` | Stays where it is                                                                             |
-| What the proxy does | Rewrites `/pricing` to `/<code>/pricing` (the code names the variants)   | Passes the code in a request header                                                           |
-| Caching             | One cached (ISR) render per variant                                      | Rendered per request                                                                          |
-| Use for             | Marketing pages                                                          | Pages that are already dynamic, apps with a top-level `[slug]` route, `cacheComponents: true` |
+|                     | Static (default)                                                         | Dynamic                                                              |
+| ------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| Page file           | Moved to `app/[evolve]/<route>/page.tsx` and wrapped with `withEvolve()` | Stays where it is                                                    |
+| What the proxy does | Rewrites `/pricing` to `/<code>/pricing` (the code names the variants)   | Passes the code in a request header                                  |
+| Caching             | One cached (ISR) render per variant                                      | Rendered per request                                                 |
+| Use for             | Marketing pages                                                          | Pages that are already dynamic, apps with a top-level `[slug]` route |
 
 `init` picks static unless moving the page isn't safe: a top-level dynamic segment (`app/[slug]`), a route group, `force-dynamic`, its own `generateStaticParams`, a `"use client"` page, or a layout shared with child routes. It says which reason applied.
 
-**`cacheComponents: true`** (on in new `create-next-app` projects since Next 16.4) rejects the segment config static mode uses, so `init` uses dynamic mode for every route. Wrap each `<Optimizable>` in `<Suspense>`: the region then streams in after the static shell, and the rest of the page stays prerendered.
+**`cacheComponents: true`** (on in new `create-next-app` projects since Next 16.4) works in both modes.
+
+- **Dynamic mode** (what `init` sets up with `cacheComponents`): wrap each `<Optimizable>` in `<Suspense>`. The region streams in after the static shell, and the rest of the page stays prerendered.
+- **Static mode** (by hand for now): Next rejects the `revalidate` and `dynamicParams` exports, so the page caches itself instead. Mark the default export `"use cache"` with a `cacheLife`; `params` (the variant code) is part of the cache key, so each variant is cached once, and control is prerendered at build time:
+
+```tsx
+// app/[evolve]/pricing/page.tsx
+import { cacheLife } from "next/cache";
+import { type EvolvePageProps, evolveMetadata, evolveStaticParams, withEvolve } from "next-evolve";
+import Pricing from "./pricing"; // your page, with its <Optimizable> regions
+
+export const generateStaticParams = evolveStaticParams;
+export const generateMetadata = evolveMetadata("/pricing", { title: "Pricing" });
+
+const EvolvePricing = withEvolve(Pricing, { path: "/pricing" });
+
+export default async function Page({ params }: EvolvePageProps) {
+  "use cache";
+  cacheLife("hours");
+  return <EvolvePricing params={params} />;
+}
+```
+
+Don't read `searchParams`, `cookies()` or `headers()` inside that page: they would make it per request (or fail the build). `npx next-evolve doctor` checks the page shape when `cacheComponents` is on. On a self-hosted `next start` or Docker server, Next's default `"use cache"` store is in memory, per process.
 
 Direct requests to `/ev_…` paths return 404; they exist only as rewrite targets. In static mode, `evolveMetadata()` sets the canonical URL to the original path and marks variant renders `noindex`.
 

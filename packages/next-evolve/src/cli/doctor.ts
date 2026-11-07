@@ -83,6 +83,27 @@ const read = (p: string) => {
   }
 };
 
+/**
+ * Static mode with `cacheComponents` (T23.3, HOST-2): Next rejects the segment
+ * config the classic static page exports, and the page must cache itself per
+ * variant code with "use cache" (+ cacheLife), keyed on `params`.
+ */
+export function cacheComponentsPage(path: string, page: string, src: string): string[] {
+  const problems: string[] = [];
+  const segment = ["revalidate", "dynamicParams"].filter((k) =>
+    new RegExp(`export\\s+const\\s+${k}\\b`).test(src),
+  );
+  if (segment.length)
+    problems.push(
+      `${path}: ${page} exports ${segment.join(", ")}, which cacheComponents rejects; remove it and cache the page with "use cache" + cacheLife (see docs/concepts.md)`,
+    );
+  if (!/["']use cache["']/.test(src))
+    problems.push(
+      `${path}: ${page} has no "use cache": with cacheComponents, add "use cache" and cacheLife("hours") to the default export so each variant code is cached (see docs/concepts.md)`,
+    );
+  return problems;
+}
+
 export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
   const cwd = deps.cwd ?? process.cwd();
   const env: Env = { ...fileEnv(cwd), ...deps.env };
@@ -277,9 +298,11 @@ export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
       const page = ["tsx", "jsx", "ts", "js"]
         .map((e) => `${app}/[evolve]${seg}/page.${e}`)
         .find((f) => existsSync(join(cwd, f)));
+      const src = page ? (read(join(cwd, page)) ?? "") : "";
       if (!page) problems.push(`${r.path}: no ${app}/[evolve]${seg}/page (run init again)`);
-      else if (!read(join(cwd, page))?.includes("withEvolve"))
+      else if (!src.includes("withEvolve"))
         problems.push(`${r.path}: ${page} isn't wrapped with withEvolve()`);
+      else if (d.cacheComponents) problems.push(...cacheComponentsPage(r.path, page, src));
     }
     checks.push(problems.length ? fail("Pages", problems.join("; ")) : ok("Pages"));
   }

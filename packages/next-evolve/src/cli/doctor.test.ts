@@ -201,9 +201,9 @@ describe("next-evolve doctor (spec §16.2)", () => {
     );
     expect(by(await doctor(dir), "EvolveScript").status).toBe("fail");
 
-    // cacheComponents → warn under Next.js.
+    // cacheComponents is supported (T23.3): no warning under Next.js.
     writeFileSync(join(dir, "next.config.ts"), "export default { cacheComponents: true };\n");
-    expect(by(await doctor(dir), "Next.js")).toMatchObject({ status: "warn" });
+    expect(by(await doctor(dir), "Next.js")).toMatchObject({ status: "ok" });
 
     // Cloud can't reach the app; no app URL yet only warns.
     c = await doctor(dir, { fetch: undefined });
@@ -217,6 +217,43 @@ describe("next-evolve doctor (spec §16.2)", () => {
     // Off Vercel: CDN warning.
     c = await doctor(dir, {}, { VERCEL: undefined });
     expect(by(c, "CDN")).toMatchObject({ status: "warn", detail: expect.stringMatching(/CDN/) });
+  });
+
+  it('cacheComponents + static mode: segment config fails, a "use cache" page passes (T23.3)', async () => {
+    const dir = await healthy();
+    writeFileSync(join(dir, "next.config.ts"), "export default { cacheComponents: true };\n");
+    // init's classic static pages export revalidate/dynamicParams and don't cache themselves.
+    let pages = by(await doctor(dir), "Pages");
+    expect(pages.status).toBe("fail");
+    expect(pages.detail).toMatch(
+      /exports revalidate, dynamicParams, which cacheComponents rejects/,
+    );
+    expect(pages.detail).toMatch(/no "use cache"/);
+    const cached = (path: string) => `import { cacheLife } from "next/cache";
+import { type EvolvePageProps, evolveMetadata, evolveStaticParams, withEvolve } from "next-evolve";
+
+export const generateStaticParams = evolveStaticParams;
+export const generateMetadata = evolveMetadata("${path}");
+
+const EvolvePage = withEvolve(() => null, { path: "${path}" });
+
+export default async function Page({ params }: EvolvePageProps) {
+  "use cache";
+  cacheLife("hours");
+  return <EvolvePage params={params} />;
+}
+`;
+    writeFileSync(join(dir, "app/[evolve]/page.tsx"), cached("/"));
+    pages = by(await doctor(dir), "Pages");
+    expect(pages.detail).not.toMatch(/^\/:/);
+    expect(pages.detail).toMatch(/\/pricing/);
+    writeFileSync(join(dir, "app/[evolve]/pricing/page.tsx"), cached("/pricing"));
+    const c = await doctor(dir);
+    expect(by(c, "Pages")).toMatchObject({ status: "ok" });
+    expect(by(c, "Next.js")).toMatchObject({ status: "ok" });
+    // Without cacheComponents, the same pages are fine too.
+    writeFileSync(join(dir, "next.config.ts"), "export default {};\n");
+    expect(by(await doctor(dir), "Pages")).toMatchObject({ status: "ok" });
   });
 
   it("the command prints each check and exits 1 on a failure", async () => {

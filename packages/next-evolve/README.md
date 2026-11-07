@@ -51,7 +51,7 @@ It installs `next-evolve` and `zod`, checks the key, migrates the database and w
 | `package.json`                          | `"prebuild": "next-evolve pull"`                                                                                                  |
 | `.env.local`                            | `EVOLVE_SECRET_KEY`, `EVOLVE_WEBHOOK_SECRET`, `EVOLVE_DATABASE_URL`, `EVOLVE_TRACK_SECRET` (never overwrites a line that's there) |
 
-**Static or dynamic mode.** By default each tested page moves to `app/[evolve]/…` and is cached once per variant ("static mode"). `init` keeps a page where it is ("dynamic mode") when moving it isn't safe, and says why. If your `next.config` has `cacheComponents: true` (new `create-next-app` projects do), every route uses dynamic mode. See [docs/concepts.md](docs/concepts.md#static-and-dynamic-mode).
+**Static or dynamic mode.** By default each tested page moves to `app/[evolve]/…` and is cached once per variant ("static mode"). `init` keeps a page where it is ("dynamic mode") when moving it isn't safe, and says why. If your `next.config` has `cacheComponents: true` (new `create-next-app` projects do), `init` uses dynamic mode; static mode works too, with a `"use cache"` page. See [docs/concepts.md](docs/concepts.md#static-and-dynamic-mode).
 
 If you already have a `proxy.ts`/`middleware.ts`, or `init` can't edit your layout, it prints the lines to add.
 
