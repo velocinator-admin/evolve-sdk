@@ -1,5 +1,0 @@
----
-"@next-evolve/protocol": minor
----
-
-Protocol 1.3.0: UTM rules (D75), additive to pv 1. Bundles may carry an optional top-level `rules: [{ id, exp, var, when: [{ f, op, v }] }]` in dashboard order (all conditions AND; first match per experiment wins). Fields `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `ref` (referrer host), `country`, `device`; operators `eq`, `in`, `prefix`, `re`. Limits: 20 rules per experiment, 50 per bundle, 10 conditions per rule, values ≤ 200 chars. The bundle schema checks that each rule's experiment is running and its variant belongs to it; `f`/`op` stay open strings for readers (an unknown one makes the evaluator skip the rule), while the new `ruleSchema`/`condSchema` are strict for writers. The signed `hash` still covers routing + variants only, so 1.2.0 readers verify a bundle with rules and ignore them; the new `computeContentHash()` also covers `rules` when present, for change detection. New fixture `bundle-payload-rules.json`; every 1.2.0 fixture is byte-identical.
