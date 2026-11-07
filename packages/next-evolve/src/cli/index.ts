@@ -8,6 +8,7 @@ import { initCommand } from "./init";
 import { migrateCommand } from "./migrate";
 import { pullCommand } from "./pull";
 import { pushCommand } from "./push";
+import { WRAP_USAGE, wrapCommand } from "./wrap";
 
 type Env = Record<string, string | undefined>;
 type Command = {
@@ -57,6 +58,21 @@ const COMMANDS: Record<string, Command> = {
     usage: "doctor",
     summary: "Check the whole setup (env, key, DB, bundle, proxy, pages, cloud → app)",
     run: (args, env) => doctorCommand(args, { env }),
+  },
+  wrap: {
+    usage: WRAP_USAGE,
+    summary: "Make components optimizable: Zod schema from their props + <Optimizable id> usage",
+    run: async (args) => {
+      const interactive = process.stdin.isTTY && !args.includes("--yes") && !args.includes("-y");
+      if (!interactive) return wrapCommand(args, { ask: null });
+      const { createInterface } = await import("node:readline/promises");
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        return await wrapCommand(args, { ask: (q) => rl.question(q) });
+      } finally {
+        rl.close();
+      }
+    },
   },
   aggregate: {
     usage: "aggregate [--upload]",

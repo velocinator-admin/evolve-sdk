@@ -1,0 +1,161 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`schema per corpus component > app/(marketing)/story/page.tsx (StoryIntro) 1`] = `
+"z.object({
+  heading: z.string().max(80),
+  body: z.string().max(400),
+})
+(all editable)"
+`;
+
+exports[`schema per corpus component > components/announcement-bar.tsx (AnnouncementBar) 1`] = `
+"z.object({
+  variant: z.enum(["neutral", "promo"]).optional(),
+  dismissible: z.boolean().optional(),
+})
+// Kept as you pass them (not editable): children (React content), theme (a TypeScript enum)."
+`;
+
+exports[`schema per corpus component > components/countdown.tsx (Countdown) 1`] = `
+"z.object({
+  label: z.string().max(40),
+  urgent: z.boolean().optional(),
+})
+// Kept as you pass them (not editable): endsAt (an object)."
+`;
+
+exports[`schema per corpus component > components/cta-banner.tsx (CtaBanner) 1`] = `
+"z.object({
+  message: z.string().max(160),
+  buttonText: z.string().max(40),
+  tone: z.enum(["info", "warning", "success"]).optional(),
+})
+// Kept as you pass them (not editable): href (a link or asset URL)."
+`;
+
+exports[`schema per corpus component > components/faq.tsx (Faq) 1`] = `
+"z.object({
+  title: z.string().max(80),
+  defaultOpen: z.number().optional(),
+})
+// Kept as you pass them (not editable): items (an array of objects)."
+`;
+
+exports[`schema per corpus component > components/feature-grid.tsx (FeatureGrid) 1`] = `
+"z.object({
+  heading: z.string().max(80),
+  features: z.array(z.string().max(120)),
+  columns: z.literal([2, 3, 4]).optional(),
+})
+// Kept as you pass them (not editable): icons (React content)."
+`;
+
+exports[`schema per corpus component > components/hero.tsx (Hero) 1`] = `
+"z.object({
+  title: z.string().max(80),
+  subtitle: z.string().max(160).optional(),
+  ctaLabel: z.string().max(40),
+  align: z.enum(["left", "center"]).optional(),
+})
+// Kept as you pass them (not editable): ctaHref (a link or asset URL), className (styling or an identifier)."
+`;
+
+exports[`schema per corpus component > components/hero-split.tsx (HeroSplit) 1`] = `
+"z.object({
+  title: z.string().max(80),
+  description: z.string().max(400),
+  reverse: z.boolean().optional(),
+})
+// Kept as you pass them (not editable): image (an object)."
+`;
+
+exports[`schema per corpus component > components/logo-cloud.tsx (LogoCloud) 1`] = `
+"z.object({
+  heading: z.string().max(80),
+  grayscale: z.boolean(),
+})
+// Kept as you pass them (not editable): logos (a link or asset URL)."
+`;
+
+exports[`schema per corpus component > components/marketing/product-highlight.tsx (ProductHighlight) 1`] = `
+"z.object({
+  name: z.string().max(80),
+  tagline: z.string().max(160),
+  badge: z.enum(["new", "beta"]).optional(),
+  price: z.number().optional(),
+  tags: z.array(z.string().max(40)).optional(),
+})
+(all editable)"
+`;
+
+exports[`schema per corpus component > components/newsletter-signup.tsx (NewsletterSignup) 1`] = `
+"z.object({
+  headline: z.string().max(80),
+  placeholder: z.string().max(40),
+  submitLabel: z.string().max(40),
+  successMessage: z.string().max(160).optional(),
+})
+(all editable)"
+`;
+
+exports[`schema per corpus component > components/pricing-card.tsx (PricingCard) 1`] = `
+"z.object({
+  plan: z.string().max(80),
+  price: z.number(),
+  currency: z.enum(["USD", "EUR"]),
+  features: z.array(z.string().max(120)),
+  popular: z.boolean().optional(),
+})
+(all editable)"
+`;
+
+exports[`schema per corpus component > components/pricing-table.tsx (PricingTable) 1`] = `
+"z.object({
+  heading: z.string().max(80),
+  highlight: z.enum(["basic", "pro", "team"]).optional(),
+  billing: z.enum(["monthly", "yearly"]),
+  showAnnualToggle: z.boolean().optional(),
+})
+// Kept as you pass them (not editable): plans (an array of objects)."
+`;
+
+exports[`schema per corpus component > components/promo-button.tsx (PromoButton) 1`] = `
+"z.object({
+  label: z.string().max(40),
+  variant: z.enum(["primary", "ghost"]).optional(),
+})
+(all editable)"
+`;
+
+exports[`schema per corpus component > components/quote-card.tsx (QuoteCard) 1`] = `
+"z.object({
+  quote: z.string().max(400),
+  source: z.string().max(120),
+})
+// Kept as you pass them (not editable): icon (React content)."
+`;
+
+exports[`schema per corpus component > components/signup-cta.tsx (SignupCta) 1`] = `
+"z.object({
+  label: z.string().max(40),
+  size: z.enum(["sm", "md", "lg"]).optional(),
+})
+// Kept as you pass them (not editable): href (a link or asset URL)."
+`;
+
+exports[`schema per corpus component > components/stats-strip.tsx (StatsStrip) 1`] = `
+"z.object({
+  caption: z.string().max(160).optional(),
+})
+// Kept as you pass them (not editable): title (nullable), stats (an array of objects)."
+`;
+
+exports[`schema per corpus component > components/testimonial.tsx (Testimonial) 1`] = `
+"z.object({
+  quote: z.string().max(400),
+  author: z.string().max(80),
+  jobTitle: z.string().max(80).optional(),
+  rating: z.number(),
+})
+// Kept as you pass them (not editable): avatarUrl (a link or asset URL)."
+`;
