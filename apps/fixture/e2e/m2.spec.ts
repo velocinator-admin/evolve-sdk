@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { sql } from "./db";
-import { TRACK_SECRET } from "./env";
+import { APP_URL, TRACK_SECRET } from "./env";
 
 // M2: beacon → collect → rows in the customer's Postgres; track/identify write locally.
 
@@ -78,7 +78,7 @@ test("a bot's beacon stores nothing", async ({ request }) => {
   const res = await request.post("/api/evolve/collect", {
     headers: {
       "user-agent": "Googlebot/2.1 (+http://www.google.com/bot.html)",
-      origin: "http://localhost:3100",
+      origin: APP_URL,
       cookie: "evolve_id=BBBBBBBBBBBBBBBBBBBBBB",
     },
     data: JSON.stringify({ v: 1, events: [{ t: "ev", n: "bot_click", p: "/" }] }),

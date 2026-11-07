@@ -5,16 +5,32 @@ import {
   TEST_WEBHOOK_SECRET,
 } from "@next-evolve/fake-cloud";
 
-export const CLOUD_PORT = 4010;
-export const APP_PORT = 3100;
+/**
+ * T23.1: `E2E_PORT_OFFSET` shifts every port below (app instances 3100–3107 and
+ * the fake cloud 4010), so two checkouts can run the e2e side by side.
+ */
+const OFFSET = Number(process.env.E2E_PORT_OFFSET ?? 0);
+const port = (p: number) => p + OFFSET;
+
+export const CLOUD_PORT = port(4010);
+export const APP_PORT = port(3100);
 export const CLOUD_URL = `http://127.0.0.1:${CLOUD_PORT}`;
 export const APP_URL = `http://localhost:${APP_PORT}`;
+
+/**
+ * T23.1 host matrix: `E2E_APP_HOST=docker` runs the main app instance from the
+ * `output: "standalone"` image (`E2E_DOCKER_IMAGE`, see Dockerfile.standalone)
+ * instead of `next start`. The other instances stay on `next start`.
+ */
+export const APP_HOST = process.env.E2E_APP_HOST === "docker" ? "docker" : "node";
+export const DOCKER_IMAGE = process.env.E2E_DOCKER_IMAGE ?? "evolve-fixture-standalone";
+export const DOCKER_CONTAINER = `evolve-e2e-${APP_PORT}`;
 
 /**
  * A second instance of the fixture for another site that polls every 10 min,
  * so only the sync webhook can bring it a new bundle quickly (T7.9).
  */
-export const SYNC_APP_PORT = 3101;
+export const SYNC_APP_PORT = port(3101);
 export const SYNC_APP_URL = `http://localhost:${SYNC_APP_PORT}`;
 export const SYNC_SITE = "site_fakesync01";
 export { TEST_SECRET_KEY, TEST_SITE, TEST_WEBHOOK_SECRET };
@@ -56,10 +72,10 @@ export const syncAppEnv = {
  * - offline: boots with its site unreachable on the fake cloud (FAKE_CLOUD_DOWN_SITES)
  *   and a customer DB URL that nothing listens on.
  */
-export const EDGE_APP_PORT = 3102;
+export const EDGE_APP_PORT = port(3102);
 export const EDGE_APP_URL = `http://localhost:${EDGE_APP_PORT}`;
 export const EDGE_SITE = "site_fakeedge01";
-export const OFFLINE_APP_PORT = 3103;
+export const OFFLINE_APP_PORT = port(3103);
 export const OFFLINE_APP_URL = `http://localhost:${OFFLINE_APP_PORT}`;
 export const OFFLINE_SITE = "site_fakeoffl01";
 export const DEAD_DB_URL = "postgres://evolve:evolve@127.0.0.1:1/customer";
@@ -160,7 +176,7 @@ export const M1_BUNDLE = {
  * T12.5: a production build (`next start`) given the test public key WITHOUT
  * EVOLVE_UNSAFE_ALLOW_TEST_KEY. It must reject every bundle the fake cloud signs.
  */
-export const PRODKEY_APP_PORT = 3106;
+export const PRODKEY_APP_PORT = port(3106);
 export const PRODKEY_APP_URL = `http://localhost:${PRODKEY_APP_PORT}`;
 export const PRODKEY_SITE = "site_fakeprodk1";
 const { EVOLVE_UNSAFE_ALLOW_TEST_KEY: _allow, ...withoutOptIn } = appEnv;
@@ -175,7 +191,7 @@ export const prodkeyAppEnv = {
  * 10 min, so a pause reaches it through the sync webhook and the bundle
  * fetches it makes are easy to count.
  */
-export const CDN_APP_PORT = 3107;
+export const CDN_APP_PORT = port(3107);
 export const CDN_APP_URL = `http://localhost:${CDN_APP_PORT}`;
 export const CDN_SITE = "site_fakecdnr01";
 export const CDN_MAX_AGE = 4;
