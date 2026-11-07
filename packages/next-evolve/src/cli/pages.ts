@@ -100,7 +100,7 @@ export function planPages(plan: Plan, d: Detection, routes: RouteMode[]): RouteM
     if (!ts) return keep(`typescript isn't installed, so the page can't be moved safely`);
 
     const src = plan.read(`${from}/${pageName}`)!;
-    const rewritten = wrapPage(ts, src, pageName, r.path);
+    const rewritten = wrapPage(ts, src, pageName, r.path, { cacheComponents: d.cacheComponents });
     if (!rewritten.ok) return keep(rewritten.why);
 
     // What moves with the page: co-located files, unless child routes would lose them.
@@ -168,13 +168,34 @@ function exportedConst(ts: typeof TS, s: TS.Statement, name: string) {
   );
 }
 
-/** Wraps the page module: default export → withEvolve, metadata → evolveMetadata. */
+/** `base`, or `base2`, `base3`… when the file already uses that name. */
+function freeName(src: string, base: string): string {
+  for (let i = 1; ; i++) {
+    const name = i === 1 ? base : `${base}${i}`;
+    if (!new RegExp(`\\b${name}\\b`).test(src)) return name;
+  }
+}
+
+/**
+ * Wraps the page module: default export → withEvolve, metadata → evolveMetadata.
+ * With `cacheComponents` (T31.2) Next rejects segment config, so instead of
+ * `revalidate`/`dynamicParams` the default export is an async page marked
+ * `"use cache"` + `cacheLife("hours")` that renders the wrapped page with its
+ * params: one cached render per variant code (like apps/fixture-cc).
+ */
 export function wrapPage(
   ts: typeof TS,
   src: string,
   file: string,
   path: string,
+  opts: { cacheComponents?: boolean } = {},
 ): { ok: true; code: string } | { ok: false; why: string } {
+  const cc = Boolean(opts.cacheComponents);
+  if (cc && /\.ts$/.test(file))
+    return {
+      ok: false,
+      why: `${file} can't hold the JSX of a "use cache" page; rename it to .tsx`,
+    };
   const sf = parse(ts, src, file);
   const first = sf.statements[0];
   if (
@@ -272,9 +293,27 @@ export function wrapPage(
     }
   }
   if (!component) return { ok: false, why: "the page has no default export" };
+  if (cc && (has.revalidate || has.dynamicParams))
+    return {
+      ok: false,
+      why: `the page exports ${has.revalidate ? "revalidate" : "dynamicParams"}, which cacheComponents rejects`,
+    };
+  // A cached page can't read request data (the build fails).
+  const reads = cc && /\b(searchParams|cookies\(|headers\(|connection\(|draftMode\()/.exec(src);
+  if (reads)
+    return {
+      ok: false,
+      why: `the page reads ${reads[1]!.replace("(", "()")}, which a "use cache" page can't`,
+    };
+  const typed = /\.tsx$/.test(file);
 
   // Missing next-evolve names, merged into an existing import when there is one.
-  const want = ["evolveMetadata", "evolveStaticParams", "withEvolve"];
+  const want = [
+    ...(cc && typed ? ["type EvolvePageProps"] : []),
+    "evolveMetadata",
+    "evolveStaticParams",
+    "withEvolve",
+  ];
   const existing = sf.statements.find(
     (s): s is TS.ImportDeclaration =>
       ts.isImportDeclaration(s) &&
@@ -288,7 +327,7 @@ export function wrapPage(
   if (existing) {
     const named = existing.importClause!.namedBindings as TS.NamedImports;
     const have = named.elements.map((e) => e.name.text);
-    const add = want.filter((n) => !have.includes(n));
+    const add = want.filter((n) => !have.includes(n.replace(/^type /, "")));
     if (add.length) {
       const last = named.elements[named.elements.length - 1];
       const at = last ? last.getEnd() : named.getStart(sf) + 1;
@@ -297,8 +336,30 @@ export function wrapPage(
   } else addLine = `import { ${want.join(", ")} } from "next-evolve";`;
 
   let code = applyEdits(src, edits);
+  if (cc && !hasNamedImport(ts, sf, "next/cache", "cacheLife"))
+    code = addImport(code, 'import { cacheLife } from "next/cache";');
   if (addLine) code = addImport(code, addLine);
   const p = JSON.stringify(path);
+  if (cc) {
+    const wrapped = freeName(code, `Evolve${component}`);
+    const page = freeName(`${code}\n${wrapped}`, "CachedPage");
+    const tail = [
+      "",
+      "// Static mode (next-evolve) with cacheComponents: one cached render per variant",
+      '// under [evolve], cached by "use cache" (Next rejects revalidate/dynamicParams here).',
+      "export const generateStaticParams = evolveStaticParams;",
+      `export const generateMetadata = evolveMetadata(${p}${metadata ? `, ${metadata}` : ""});`,
+      `const ${wrapped} = withEvolve(${component}, { path: ${p} });`,
+      "",
+      `export default async function ${page}({ params }${typed ? ": EvolvePageProps" : ""}) {`,
+      '  "use cache";',
+      '  cacheLife("hours");',
+      `  return <${wrapped} params={params} />;`,
+      "}",
+      "",
+    ];
+    return { ok: true, code: `${code.replace(/\s*$/, "\n")}${tail.join("\n")}` };
+  }
   const tail = [
     "",
     "// Static mode (next-evolve): one cached render per variant under [evolve].",
@@ -310,6 +371,18 @@ export function wrapPage(
     "",
   ];
   return { ok: true, code: `${code.replace(/\s*$/, "\n")}${tail.join("\n")}` };
+}
+
+function hasNamedImport(ts: typeof TS, sf: TS.SourceFile, from: string, name: string): boolean {
+  return sf.statements.some(
+    (s) =>
+      ts.isImportDeclaration(s) &&
+      ts.isStringLiteral(s.moduleSpecifier) &&
+      s.moduleSpecifier.text === from &&
+      !!s.importClause?.namedBindings &&
+      ts.isNamedImports(s.importClause.namedBindings) &&
+      s.importClause.namedBindings.elements.some((e) => e.name.text === name && !e.isTypeOnly),
+  );
 }
 
 /** Rewrites relative specifiers for a file that moved; files moving together keep pointing at each other. */

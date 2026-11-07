@@ -45,8 +45,7 @@ Each route in `evolve.config.ts` has a mode.
 
 **`cacheComponents: true`** (on in new `create-next-app` projects since Next 16.4) works in both modes.
 
-- **Dynamic mode** (what `init` sets up with `cacheComponents`): wrap each `<Optimizable>` in `<Suspense>`. The region streams in after the static shell, and the rest of the page stays prerendered.
-- **Static mode** (by hand for now): Next rejects the `revalidate` and `dynamicParams` exports, so the page caches itself instead. Mark the default export `"use cache"` with a `cacheLife`; `params` (the variant code) is part of the cache key, so each variant is cached once, and control is prerendered at build time:
+- **Static mode** (what `init` sets up): Next rejects the `revalidate` and `dynamicParams` exports, so the page caches itself instead. The default export is marked `"use cache"` with a `cacheLife`; `params` (the variant code) is part of the cache key, so each variant is cached once, and control is prerendered at build time. `init` writes this page when it moves one; a page that reads `searchParams`, `cookies()` or `headers()` stays in dynamic mode, and `--cdn-routing` isn't supported with `cacheComponents` yet. By hand:
 
 ```tsx
 // app/[evolve]/pricing/page.tsx
@@ -66,7 +65,9 @@ export default async function Page({ params }: EvolvePageProps) {
 }
 ```
 
-Don't read `searchParams`, `cookies()` or `headers()` inside that page: they would make it per request (or fail the build). `npx next-evolve doctor` checks the page shape when `cacheComponents` is on. On a self-hosted `next start` or Docker server, Next's default `"use cache"` store is in memory, per process.
+- **Dynamic mode** (`--mode dynamic`): wrap each `<Optimizable>` in `<Suspense>`. The region streams in after the static shell, and the rest of the page stays prerendered.
+
+Don't read `searchParams`, `cookies()` or `headers()` inside the static page: they would make it per request (or fail the build). `npx next-evolve doctor` checks the page shape when `cacheComponents` is on. On a self-hosted `next start` or Docker server, Next's default `"use cache"` store is in memory, per process.
 
 Direct requests to `/ev_…` paths return 404; they exist only as rewrite targets. In static mode, `evolveMetadata()` sets the canonical URL to the original path and marks variant renders `noindex`.
 

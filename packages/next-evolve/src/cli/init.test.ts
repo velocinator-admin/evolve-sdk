@@ -13,6 +13,7 @@ import { freshApp, LAYOUT } from "../../test/apps";
 import { project } from "../../test/project";
 import { evolveMatcher } from "../config/cdn";
 import { defineConfig } from "../config/config";
+import { cacheComponentsPage } from "./doctor";
 import { type InitDeps, initCommand } from "./init";
 import { evalMatcher, matcherSource } from "./matcher";
 
@@ -91,7 +92,7 @@ describe("next-evolve init (spec §16.1)", () => {
     expect(r.runCmd).not.toHaveBeenCalled(); // already installed
   });
 
-  it("a create-next-app 16.4 project (cacheComponents, one-line <body>): dynamic mode, script added, <Suspense> hint", async () => {
+  it("a create-next-app 16.4 project (cacheComponents, one-line <body>): dynamic mode on request, script added, <Suspense> hint", async () => {
     const dir = freshApp({
       "next.config.ts":
         "const nextConfig = { cacheComponents: true };\nexport default nextConfig;\n",
@@ -106,7 +107,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
 }
 `,
     });
-    const r = await run(dir, [...keys, "--yes"]);
+    const r = await run(dir, [...keys, "--yes", "--mode", "dynamic"]);
     expect(r.code, r.text).toBe(0);
     expect(read(dir, "evolve.config.ts")).toContain('"/": { mode: "dynamic" }');
     expect(existsSync(join(dir, "app/page.tsx"))).toBe(true); // not moved under [evolve]
@@ -118,13 +119,93 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     );
     expect(r.text).not.toContain("Add <EvolveScript />");
     expect(r.text).toContain("<Suspense><Optimizable");
+  });
 
-    const forced = await run(
-      freshApp({ "next.config.ts": "export default { cacheComponents: true };\n" }),
-      [...keys, "--yes", "--mode", "static"],
+  // T31.2: static mode with cacheComponents, the apps/fixture-cc way.
+  it('cacheComponents: static mode by default, the page cached with "use cache" + cacheLife', async () => {
+    const dir = freshApp({
+      "next.config.ts": "export default { cacheComponents: true };\n",
+      "app/pricing/page.tsx": `import type { Metadata } from "next";
+import { Optimizable } from "next-evolve";
+import Cta from "./cta";
+
+export const metadata: Metadata = { title: "Pricing" };
+
+export default function Pricing() {
+  return <Optimizable id="cta" component={Cta} props={{ label: "Go" }} />;
+}
+`,
+      "app/pricing/cta.tsx":
+        "export default function Cta(p: { label: string }) {\n  return <a>{p.label}</a>;\n}\n",
+      "app/about/page.tsx": `import { cookies } from "next/headers";
+
+export default async function About() {
+  return <p>{(await cookies()).get("x")?.value}</p>;
+}
+`,
+    });
+    const r = await run(dir, [...keys, "--yes", "--routes", "/ /pricing /about"]);
+    expect(r.code, r.text).toBe(0);
+    const config = read(dir, "evolve.config.ts");
+    expect(config).toContain('"/": { mode: "static" }');
+    expect(config).toContain('"/pricing": { mode: "static" }');
+    // Reads request data: a cached page can't, so it stays dynamic and init says why.
+    expect(config).toContain('"/about": { mode: "dynamic" }');
+    expect(r.text).toContain(
+      '/about: kept dynamic, the page reads cookies(), which a "use cache" page can\'t',
     );
-    expect(forced.code).toBe(1);
-    expect(forced.text).toMatch(/static mode doesn't work with it/);
+
+    expect(existsSync(join(dir, "app/page.tsx"))).toBe(false);
+    expect(read(dir, "app/[evolve]/page.tsx")).toBe(`import { cacheLife } from "next/cache";
+import { type EvolvePageProps, evolveMetadata, evolveStaticParams, withEvolve } from "next-evolve";
+
+function Home() {
+  return <h1>Home</h1>;
+}
+
+// Static mode (next-evolve) with cacheComponents: one cached render per variant
+// under [evolve], cached by "use cache" (Next rejects revalidate/dynamicParams here).
+export const generateStaticParams = evolveStaticParams;
+export const generateMetadata = evolveMetadata("/");
+const EvolveHome = withEvolve(Home, { path: "/" });
+
+export default async function CachedPage({ params }: EvolvePageProps) {
+  "use cache";
+  cacheLife("hours");
+  return <EvolveHome params={params} />;
+}
+`);
+    const pricing = read(dir, "app/[evolve]/pricing/page.tsx");
+    // Merged into the page's own next-evolve import; metadata kept as the base.
+    expect(pricing).toContain(
+      'import { Optimizable, type EvolvePageProps, evolveMetadata, evolveStaticParams, withEvolve } from "next-evolve";',
+    );
+    expect(pricing).toContain('evolveMetadata("/pricing", metadata)');
+    expect(pricing).toContain('const EvolvePricing = withEvolve(Pricing, { path: "/pricing" });');
+    expect(existsSync(join(dir, "app/[evolve]/pricing/cta.tsx"))).toBe(true);
+    // doctor's cacheComponents page check passes on both.
+    for (const f of ["app/[evolve]/page.tsx", "app/[evolve]/pricing/page.tsx"])
+      expect(cacheComponentsPage("/", f, read(dir, f))).toEqual([]);
+    // Static pages under "use cache" don't need the <Suspense> hint (/about is dynamic, so it's there).
+    expect(r.text).toContain("<Suspense><Optimizable");
+
+    const allStatic = freshApp({ "next.config.ts": "export default { cacheComponents: true };\n" });
+    const s = await run(allStatic, [...keys, "--yes"]);
+    expect(s.code, s.text).toBe(0);
+    expect(s.text).not.toContain("<Suspense>");
+    expect(s.text).toContain('Wrap a component: <Optimizable id="hero"');
+
+    // A re-run plans nothing.
+    const again = await run(allStatic, [...keys, "--yes"]);
+    expect(again.code, again.text).toBe(0);
+    expect(again.text).toContain("files already set up");
+
+    const cdn = await run(
+      freshApp({ "next.config.ts": "export default { cacheComponents: true };\n" }),
+      [...keys, "--yes", "--cdn-routing"],
+    );
+    expect(cdn.code).toBe(1);
+    expect(cdn.text).toMatch(/--cdn-routing isn't supported with cacheComponents yet/);
   });
 
   it("installs next-evolve and zod with the app's package manager when missing", async () => {

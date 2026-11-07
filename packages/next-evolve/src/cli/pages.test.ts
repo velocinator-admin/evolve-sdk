@@ -263,4 +263,46 @@ export default function Pricing() {
     );
     expect(page.match(/from "next-evolve"/g)).toHaveLength(1);
   });
+
+  // T31.2: with cacheComponents the page caches itself ("use cache" + cacheLife).
+  it("cacheComponents: anonymous/JS pages, names already taken, an own cacheLife import; .ts and segment config stay dynamic", () => {
+    const cc = { "next.config.ts": "export default { cacheComponents: true };\n" };
+    const { plan, out, d } = setup(
+      {
+        ...cc,
+        "app/a/page.tsx": "export default function () {\n  return <p>a</p>;\n}\n",
+        "app/b/page.jsx": "export default () => <p>b</p>;\n",
+        "app/c/page.tsx":
+          'import { cacheLife } from "next/cache";\nconst EvolveC = 1;\nfunction CachedPage() {\n  return <p>{EvolveC}</p>;\n}\nexport default function C() {\n  return <CachedPage />;\n}\n',
+        "app/d/page.ts": 'export default function D() {\n  return "d";\n}\n',
+        "app/e/page.tsx":
+          "export const revalidate = 60;\nexport default function E() {\n  return <p>e</p>;\n}\n",
+      },
+      ["/a", "/b", "/c", "/d", "/e"],
+    );
+    expect(d.cacheComponents).toBe(true);
+    expect(modes(out)).toEqual({
+      "/a": "static",
+      "/b": "static",
+      "/c": "static",
+      "/d": "dynamic",
+      "/e": "dynamic",
+    });
+    const a = plan.read("app/[evolve]/a/page.tsx")!;
+    expect(a).toContain("const EvolvePage = withEvolve(Page, {");
+    expect(a).toContain("export default async function CachedPage({ params }: EvolvePageProps) {");
+    expect(a).not.toMatch(/export const (revalidate|dynamicParams)/);
+    const b = plan.read("app/[evolve]/b/page.jsx")!;
+    expect(b).toContain(
+      'import { evolveMetadata, evolveStaticParams, withEvolve } from "next-evolve";',
+    );
+    expect(b).toContain("export default async function CachedPage({ params }) {");
+    const c = plan.read("app/[evolve]/c/page.tsx")!;
+    expect(c.match(/from "next\/cache"/g)).toHaveLength(1);
+    expect(c).toContain("const EvolveC2 = withEvolve(C, {");
+    expect(c).toContain("export default async function CachedPage2({ params }: EvolvePageProps) {");
+    expect(c).toContain("return <EvolveC2 params={params} />;");
+    expect(plan.notes.join("\n")).toContain("page.ts can't hold the JSX");
+    expect(plan.notes.join("\n")).toContain("exports revalidate, which cacheComponents rejects");
+  });
 });

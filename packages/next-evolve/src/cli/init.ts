@@ -92,20 +92,20 @@ export async function initCommand(args: string[], deps: InitDeps): Promise<numbe
     `✓ Next.js ${d.nextVersion} · ${d.appDir}/ · ${d.typescript ? "TypeScript" : "JavaScript"} · ${d.packageManager}`,
   );
 
-  // cacheComponents (on in new create-next-app projects) rejects the segment
-  // config static mode writes (revalidate, dynamicParams), so use dynamic.
-  const mode = f.mode ?? (d.cacheComponents ? "dynamic" : "static");
+  // With cacheComponents (on in new create-next-app projects) static pages
+  // cache themselves with "use cache" + cacheLife instead of segment config (T31.2).
+  const mode = f.mode ?? "static";
   if (mode !== "static" && mode !== "dynamic") {
     err('next-evolve init: --mode is "static" or "dynamic"');
     return 1;
   }
-  if (d.cacheComponents && mode === "static") {
+  const cdn = Boolean(f["cdn-routing"]);
+  if (cdn && d.cacheComponents) {
     err(
-      "✗ cacheComponents is on, and static mode doesn't work with it: use --mode dynamic (the default with cacheComponents)",
+      "✗ --cdn-routing isn't supported with cacheComponents yet: drop --cdn-routing (static mode works without it)",
     );
     return 1;
   }
-  const cdn = Boolean(f["cdn-routing"]);
   if (cdn && mode !== "static") {
     err(
       "✗ --cdn-routing needs static routes (dynamic routes always run the proxy): drop --mode dynamic, or drop --cdn-routing",
@@ -261,7 +261,7 @@ export async function initCommand(args: string[], deps: InitDeps): Promise<numbe
     ...(added.length && !dry
       ? [`In production, set ${added.join(", ")} (they're in .env.local now)`]
       : []),
-    d.cacheComponents
+    d.cacheComponents && finalRoutes.some((r) => r.mode === "dynamic")
       ? `Wrap a component: <Suspense><Optimizable id="hero" component={Hero} props={...} /></Suspense> (Optimizable from "next-evolve"; cacheComponents needs the <Suspense>)`
       : `Wrap a component: <Optimizable id="hero" component={Hero} props={...} /> (from "next-evolve")`,
     "Visit the page once so the region registers, then open the dashboard",
