@@ -107,8 +107,19 @@ export const M1_BUNDLE = {
       "/slow": ["s1ow01"],
       // T21.1: a pattern route (D77); every /lp/<slug> serves it.
       "/lp/:slug": ["l1p2a3"],
+      // T29.1/T29.2 (TPL-1): person pages; the variant fills {name} and {fullName}.
+      "/:name([A-Z][A-Za-z]*-[A-Za-z-]+)": ["t1p2l3"],
     },
     experiments: {
+      t1p2l3: {
+        status: "running",
+        traffic: 1,
+        control: "pc0001",
+        variants: [
+          { id: "pc0001", w: 0 },
+          { id: "pv0001", w: 1 },
+        ],
+      },
       l1p2a3: {
         status: "running",
         traffic: 1,
@@ -182,6 +193,13 @@ export const M1_BUNDLE = {
     },
     lc0000: { exp: "l1p2a3", region: "lp-hero", ctrl: true, props: {} },
     ld0000: { exp: "l1p2a3", region: "lp-hero", ctrl: false, props: { title: "Landing variant" } },
+    pc0001: { exp: "t1p2l3", region: "person-hero", ctrl: true, props: {} },
+    pv0001: {
+      exp: "t1p2l3",
+      region: "person-hero",
+      ctrl: false,
+      props: { title: "Hire {name} today", cta: "Meet {fullName}" },
+    },
   },
   // T20.2: UTM rule (D75): spring-sale visitors on /pricing see the trial CTA.
   rules: [

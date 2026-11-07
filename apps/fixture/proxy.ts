@@ -35,6 +35,7 @@ export const config = {
     "/features",
     "/slow",
     "/lp/:slug",
+    "/:name([A-Z][A-Za-z]*-[A-Za-z-]+)",
     "/(ev_.*)",
   ],
 };

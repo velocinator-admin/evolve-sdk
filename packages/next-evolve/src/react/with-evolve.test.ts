@@ -25,7 +25,16 @@ describe("withEvolve", () => {
     const Page = withEvolve(Home, { path: "/pricing/" });
     const el = (await Page(params("ev_k3j9x2-c1d2e3"))) as ReactElement;
     expect(el.type).toBe(Home);
-    expect(ctx).toEqual({ code: "ev_k3j9x2-c1d2e3", path: "/pricing" });
+    expect(ctx).toEqual({ code: "ev_k3j9x2-c1d2e3", path: "/pricing", vars: {} });
+  });
+
+  it("keeps the page's route params for {var} placeholders (TPL-1.2)", async () => {
+    const Page = withEvolve(Home, { path: "/:name([A-Z][A-Za-z]*-[A-Za-z-]+)" });
+    await Page({ params: Promise.resolve({ evolve: "ev_0", name: "Christopher-G" }) } as never);
+    expect(ctx).toMatchObject({
+      path: "/:name([A-Z][A-Za-z]*-[A-Za-z-]+)",
+      vars: { name: "Christopher-G" },
+    });
   });
 
   it("404s on a malformed code", async () => {

@@ -7,6 +7,8 @@ export const MAX_EXPERIMENTS_PER_REQUEST = 5;
 export const MAX_GOALS_PER_EXPERIMENT = 20;
 export const MAX_RESPONSE_ROWS = 20_000;
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+/** `errors[].goal` of a response whose pages count failed (1.4.0; no `pages` then). */
+export const PAGES_ERROR_GOAL = "$pages";
 
 const id = z.string().regex(ID_RE);
 const isoDay = z.iso.date();
@@ -44,6 +46,12 @@ export const aggregateRequestSchema = z.looseObject({
   usageFrom: isoDay.nullable(),
   /** Protocol 1.1.0: absent = don't send vitals (spec §9.3). SDKs before 0.5 ignore it. */
   vitals: vitalsRequestSchema.optional(),
+  /**
+   * Protocol 1.4.0 (TPL-1): experiment ids (from `experiments`) to count
+   * distinct exposed pages for, e.g. one pattern route pooling many pages.
+   * Absent = none. SDKs before 0.9 ignore it.
+   */
+  pages: z.array(id).max(MAX_EXPERIMENTS_PER_REQUEST).optional(),
 });
 export type AggregateRequest = z.infer<typeof aggregateRequestSchema>;
 
@@ -94,6 +102,14 @@ export const aggregateResponseSchema = z.looseObject({
   ),
   /** Protocol 1.1.0: only when the request asked for `vitals` and the query succeeded. */
   vitals: z.array(vitalsRowSchema).max(MAX_VITALS_ROWS).optional(),
+  /**
+   * Protocol 1.4.0: for each id in the request's `pages`, how many distinct
+   * page paths have exposures (a count; the paths themselves never leave).
+   */
+  pages: z
+    .array(z.looseObject({ exp: id, n: count }))
+    .max(MAX_EXPERIMENTS_PER_REQUEST)
+    .optional(),
 });
 export type AggregateResponse = z.infer<typeof aggregateResponseSchema>;
 

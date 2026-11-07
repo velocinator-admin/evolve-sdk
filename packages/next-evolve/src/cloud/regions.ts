@@ -6,10 +6,10 @@ const MAX_SENT = 1000;
 
 /**
  * Registers a region with the cloud (spec §5.2), once per process per
- * (id, schema, path). Errors are swallowed; a failed push is retried on a later render.
+ * (id, schema, path, vars). Errors are swallowed; a failed push is retried on a later render.
  */
 export async function registerRegion(r: Omit<RegionRegistration, "pv">): Promise<void> {
-  const key = `${r.id}|${r.schemaHash}|${r.path}`;
+  const key = `${r.id}|${r.schemaHash}|${r.path}|${Array.isArray(r.vars) ? r.vars.join(",") : ""}`;
   if (sent.has(key)) return;
   sent.add(key);
   if (sent.size > MAX_SENT) sent.delete(sent.values().next().value!);

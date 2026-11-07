@@ -237,3 +237,61 @@ write("aggregate-response-vitals.json", {
     vitalsRow("f4g5h6", "lcp", hist("lcp", 4, [45, 110, 95, 55, 28, 10])),
   ],
 });
+
+// Protocol 1.4.0 (TPL-1, D84): a constrained route key (as-is in
+// routing.routes) whose variant copy holds `{var}` placeholders; the pages
+// count in the aggregate messages; a region registration naming its vars.
+const PERSON = "/:name([A-Z][A-Za-z]*-[A-Za-z-]+)";
+const tplRouting = {
+  routes: { ...routing.routes, [PERSON]: ["t1p2l3"] },
+  experiments: {
+    ...routing.experiments,
+    t1p2l3: {
+      status: "running",
+      traffic: 1,
+      control: "pc0001",
+      variants: [
+        { id: "pc0001", w: 0.5 },
+        { id: "pv0001", w: 0.5 },
+      ],
+    },
+  },
+};
+const tplVariants = {
+  ...variants,
+  pc0001: { exp: "t1p2l3", region: "person-hero", ctrl: true, props: {} },
+  pv0001: {
+    exp: "t1p2l3",
+    region: "person-hero",
+    ctrl: false,
+    props: { title: "Hire {name} today", cta: "Meet {fullName}" },
+  },
+};
+write("bundle-payload-template.json", {
+  pv: 1,
+  site: "site_ab12cd34ef",
+  ver: 14,
+  iat,
+  exp: iat + 14 * 86_400,
+  hash: computeBundleHash({ routing: tplRouting, variants: tplVariants } as never),
+  routing: tplRouting,
+  variants: tplVariants,
+});
+write("aggregate-request-pages.json", { ...aggregateRequest, pages: ["k3j9x2"] });
+write("aggregate-response-pages.json", {
+  ...aggregateResponse,
+  pages: [{ exp: "k3j9x2", n: 1834 }],
+});
+write("region-registration-vars.json", {
+  pv: 1,
+  id: "person-hero",
+  jsonSchema: {
+    type: "object",
+    properties: { title: { type: "string" }, cta: { type: "string" } },
+    required: ["title", "cta"],
+  },
+  schemaHash: "4c1d9f0e2b7a65381c0d4e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b",
+  controlProps: { title: "Work with a top agent", cta: "Get started" },
+  path: PERSON,
+  vars: ["fullName", "name"],
+});

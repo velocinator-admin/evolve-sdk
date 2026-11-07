@@ -4,12 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { sampleBundle } from "../../test/samples";
 
-const ctx = { code: null as string | null, path: null as string | null };
+const ctx = {
+  code: null as string | null,
+  path: null as string | null,
+  vars: null as Record<string, string> | null,
+};
 let bundles: (BundlePayload | null)[] = [];
 const getRenderBundle = vi.fn(async (_o?: { fresh?: boolean }) =>
   bundles.length > 1 ? bundles.shift()! : bundles[0]!,
 );
-const headerCode = { value: null as string | null };
+const headerCode = { value: null as string | null, vars: null as string | null };
 
 vi.mock("./context", () => ({ requestContext: () => ctx }));
 vi.mock("./render-bundle", () => ({
@@ -29,10 +33,14 @@ vi.mock("next/server", () => ({
 const registerRegion = vi.fn(async (_r: unknown) => {});
 vi.mock("../cloud/regions", () => ({ registerRegion: (r: unknown) => registerRegion(r) }));
 vi.mock("next/headers", () => ({
-  headers: async () => new Headers(headerCode.value ? { "x-evolve-a": headerCode.value } : {}),
+  headers: async () =>
+    new Headers({
+      ...(headerCode.value ? { "x-evolve-a": headerCode.value } : {}),
+      ...(headerCode.vars ? { "x-evolve-vars": headerCode.vars } : {}),
+    }),
 }));
 
-const { Optimizable, scheduleRegistration } = await import("./region");
+const { Optimizable, scheduleRegistration, regionVarNames } = await import("./region");
 const { optimizable } = await import("./optimizable");
 
 const heroSchema = z.object({
@@ -56,7 +64,10 @@ const inspect = (el: El): [Record<string, unknown> | null, Record<string, unknow
 
 beforeEach(() => {
   ctx.code = null;
+  ctx.path = null;
+  ctx.vars = null;
   headerCode.value = null;
+  headerCode.vars = null;
   bundles = [sampleBundle()];
   getRenderBundle.mockClear();
 });
@@ -213,6 +224,77 @@ describe("region registration", () => {
       await vi.runAllTimersAsync();
       expect(registerRegion).toHaveBeenCalledTimes(1);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("{var} placeholders (TPL-1.2)", () => {
+  const PERSON = "/:name([A-Z][A-Za-z]*-[A-Za-z-]+)";
+  const withTemplate = (props: Record<string, unknown>) =>
+    sampleBundle((b) => {
+      b.variants.c1d2e3!.props = props;
+    });
+  const renderWith = (vars?: Record<string, string | number | null | undefined>) =>
+    Optimizable({ id: "hero", component: Hero, props: control, vars }) as Promise<El>;
+
+  it("fills route params (static mode context)", async () => {
+    bundles = [withTemplate({ title: "Hire {name} today" })];
+    ctx.code = "ev_k3j9x2-c1d2e3";
+    ctx.path = PERSON;
+    ctx.vars = { name: "Christopher-G" };
+    const [marker, props] = inspect(await renderWith());
+    expect(props.title).toBe("Hire Christopher-G today");
+    expect(marker?.["data-evolve-x"]).toBeUndefined();
+  });
+
+  it("fills route params from the proxy header (dynamic mode) and the vars prop", async () => {
+    bundles = [withTemplate({ title: "Hire {name}", cta: "Meet {fullName}" })];
+    headerCode.value = "ev_k3j9x2-c1d2e3";
+    headerCode.vars = encodeURIComponent(JSON.stringify({ name: "Christopher-G" }));
+    const [, props] = inspect(await renderWith({ fullName: "Christopher G" }));
+    expect(props).toMatchObject({ title: "Hire Christopher-G", cta: "Meet Christopher G" });
+  });
+
+  it("a missing var renders control, marked x (not counted)", async () => {
+    bundles = [withTemplate({ title: "Hire {fullName} today" })];
+    ctx.code = "ev_k3j9x2-c1d2e3";
+    ctx.vars = { name: "Christopher-G" };
+    const [marker, props] = inspect(await renderWith({ fullName: null }));
+    expect(props).toEqual(controlOut);
+    expect(marker).toMatchObject({ "data-evolve-v": "c1d2e3", "data-evolve-x": "" });
+  });
+
+  it("a filled value that breaks the schema renders control, marked x", async () => {
+    bundles = [withTemplate({ title: "{name}" })];
+    ctx.code = "ev_k3j9x2-c1d2e3";
+    ctx.vars = { name: "ab" }; // title needs ≥ 3 chars
+    const [marker, props] = inspect(await renderWith());
+    expect(props).toEqual(controlOut);
+    expect(marker?.["data-evolve-x"]).toBe("");
+  });
+
+  it("registers var names (route params + vars keys), never values", () => {
+    expect(regionVarNames(PERSON, { fullName: "Christopher G", "bad-key": "x" })).toEqual([
+      "fullName",
+      "name",
+    ]);
+    expect(regionVarNames("/pricing", undefined)).toEqual([]);
+  });
+
+  it("the registration carries `vars` only when there are some", async () => {
+    vi.useFakeTimers();
+    try {
+      registerRegion.mockClear();
+      afterImpl.throws = true;
+      scheduleRegistration("hero", { jsonSchema: {}, schemaHash: "h" }, {}, PERSON, ["name"]);
+      scheduleRegistration("hero", { jsonSchema: {}, schemaHash: "h" }, {}, "/", []);
+      await vi.runAllTimersAsync();
+      const calls = registerRegion.mock.calls.map((c) => c[0] as Record<string, unknown>);
+      expect(calls.find((c) => c.path === PERSON)).toMatchObject({ vars: ["name"] });
+      expect(calls.find((c) => c.path === "/")).not.toHaveProperty("vars");
+    } finally {
+      afterImpl.throws = false;
       vi.useRealTimers();
     }
   });

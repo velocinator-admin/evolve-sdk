@@ -8,10 +8,19 @@ import {
   createKeyRing as createKeyRing120,
   verifyBundle as verifyBundle120,
 } from "protocol-1.2.0";
+import {
+  aggregateRequestSchema as aggregateRequestSchema130,
+  aggregateResponseSchema as aggregateResponseSchema130,
+  bundlePayloadSchema as bundlePayloadSchema130,
+  createKeyRing as createKeyRing130,
+  regionRegistrationSchema as regionRegistrationSchema130,
+  verifyBundle as verifyBundle130,
+} from "protocol-1.3.0";
 import { describe, expect, it } from "vitest";
 import { aggregateRequestSchema, aggregateResponseSchema } from "./aggregate";
 import { bundlePayloadSchema, computeBundleHash } from "./bundle";
 import { BUNDLE_TYP } from "./keys";
+import { regionRegistrationSchema } from "./manifest";
 import { aggregatePullSchema } from "./pull";
 import { syncWebhookSchema } from "./sync";
 import { generateTestKeyPair, signJws } from "./testing";
@@ -27,6 +36,10 @@ const schemas = {
   "aggregate-request-vitals": aggregateRequestSchema,
   "aggregate-response-vitals": aggregateResponseSchema,
   "aggregate-pull": aggregatePullSchema,
+  "bundle-payload-template": bundlePayloadSchema,
+  "aggregate-request-pages": aggregateRequestSchema,
+  "aggregate-response-pages": aggregateResponseSchema,
+  "region-registration-vars": regionRegistrationSchema,
 } as const;
 
 for (const pv of SUPPORTED_PROTOCOLS) {
@@ -128,5 +141,56 @@ describe("compatibility with @next-evolve/protocol 1.2.0", () => {
       now,
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
+  });
+});
+
+// Protocol 1.4.0 adds TPL-1 (D84): optional region `vars`, aggregate `pages`,
+// and constrained route keys / `{var}` placeholders in a bundle (plain strings
+// to every reader). 1.3.0 readers (SDK 0.8) parse and verify all of it.
+describe("compatibility with @next-evolve/protocol 1.3.0", () => {
+  const dir = new URL("../fixtures/v1/", import.meta.url);
+  const oldDir = new URL("../node_modules/protocol-1.3.0/fixtures/v1/", import.meta.url);
+  const read = (d: URL, f: string) => readFileSync(new URL(f, d), "utf8");
+  const json = (f: string) => JSON.parse(read(dir, f));
+
+  it("every 1.3.0 fixture is byte-identical", () => {
+    const old = readdirSync(oldDir).filter((f) => f.endsWith(".json"));
+    expect(old.length).toBe(9);
+    for (const f of old) expect(read(dir, f), f).toBe(read(oldDir, f));
+  });
+
+  it("1.3.0's schemas parse the 1.4.0 fixtures (loose objects)", () => {
+    for (const [f, schema] of [
+      ["bundle-payload-template.json", bundlePayloadSchema130],
+      ["aggregate-request-pages.json", aggregateRequestSchema130],
+      ["aggregate-response-pages.json", aggregateResponseSchema130],
+      ["region-registration-vars.json", regionRegistrationSchema130],
+    ] as const) {
+      const r = schema.safeParse(json(f));
+      expect(r.success, `${f} ${JSON.stringify(r.error?.issues)}`).toBe(true);
+    }
+  });
+
+  it("1.3.0's verifyBundle accepts a signed bundle with a constrained key", () => {
+    const b = json("bundle-payload-template.json");
+    const k = generateTestKeyPair("k1");
+    const token = signJws(b, { ...k, typ: BUNDLE_TYP });
+    const r = verifyBundle130(token, {
+      keys: createKeyRing130({ k1: k.publicKey }),
+      site: b.site,
+      now: b.iat + 60,
+    });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+  });
+
+  it("1.4.0 fixtures are the 1.3.0 messages plus the new field", () => {
+    for (const [name, field] of [
+      ["aggregate-request", "pages"],
+      ["aggregate-response", "pages"],
+    ] as const) {
+      const { [field]: added, ...rest } = json(`${name}-pages.json`);
+      expect(added).toBeDefined();
+      expect(rest).toEqual(JSON.parse(read(oldDir, `${name}.json`)));
+    }
   });
 });

@@ -43,15 +43,18 @@ The AI also never writes links or images: `url()` fields and string fields named
 <Optimizable id="hero" component={Hero} props={{ title: "Ship faster", cta: "Start free" }} />;
 ```
 
-| Prop        |                                                                                                         |
-| ----------- | ------------------------------------------------------------------------------------------------------- |
-| `id`        | Region id, unique per site: `/^[a-z0-9][a-z0-9-]{0,39}$/`                                               |
-| `component` | A component returned by `optimizable()`                                                                 |
-| `props`     | Control props. Fields with schema defaults are optional; non-schema props pass through to every variant |
+| Prop        |                                                                                                                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | Region id, unique per site: `/^[a-z0-9][a-z0-9-]{0,39}$/`                                                                                                                                         |
+| `component` | A component returned by `optimizable()`                                                                                                                                                           |
+| `props`     | Control props. Fields with schema defaults are optional; non-schema props pass through to every variant                                                                                           |
+| `vars`      | Optional (0.9+). Per-page values for `{var}` placeholders in variant copy, e.g. CMS data: `vars={{ fullName: person.fullName }}`. Route params (`{name}` on `/:name(…)`) are available without it |
 
 A server component (async). It renders the variant the proxy chose, or control. It never throws because of Evolve: a missing bundle, an unknown variant or props that fail the schema all render control. In development it warns once when it renders without Evolve context (the page isn't under `app/[evolve]/` and the route isn't a dynamic-mode route in `evolve.config.ts`).
 
-On a page's first render in a process it registers the region (id, JSON Schema of the props, control props, path) with the cloud, in the background.
+On a page's first render in a process it registers the region (id, JSON Schema of the props, control props, path, and since 0.9 the names of the vars it offers: route params plus `vars` keys) with the cloud, in the background. Var values never leave your server.
+
+**Templated pages (0.9+).** Variant string props may contain `{var}` placeholders, filled per page: `"Hire {name} today"` on `/:name([A-Z][A-Za-z]*-[A-Za-z-]+)` renders "Hire Christopher-G today" on `/Christopher-G`. A variant that uses a var the page doesn't provide (or a value over 500 characters) renders control for that view, marked not counted. Values are inserted as text (React escapes them), and the result must still pass the schema.
 
 With `cacheComponents: true` on a dynamic-mode page, wrap it in `<Suspense>` (a static `"use cache"` page needs no boundary).
 

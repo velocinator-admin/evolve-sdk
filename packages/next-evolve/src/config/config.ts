@@ -1,4 +1,5 @@
-import { compilePattern, isPattern, type RouteTable, routeTable } from "../core/routes";
+import { routeKeyError } from "@next-evolve/protocol/routes";
+import { isPattern, type RouteTable, routeTable } from "../core/routes";
 export type RouteConfig = {
   /** static (default): ISR per variant under `app/[evolve]/`. dynamic: page reads `x-evolve-a`. */
   mode: "static" | "dynamic";
@@ -7,7 +8,10 @@ export type RouteConfig = {
 export type EvolveConfig = {
   /**
    * Routes Evolve may test, keyed by pathname (e.g. "/", "/pricing") or, since
-   * 0.8, a pattern (`/lp/:slug`, `/docs/:path*`). An exact path wins over a pattern.
+   * 0.8, a pattern (`/lp/:slug`, `/docs/:path*`), and since 0.9 a regex-constrained
+   * param (`/:name([A-Z][A-Za-z]*-[A-Za-z-]+)`, one segment, ≤ 200 chars, no
+   * backreferences, lookarounds or nested quantifiers). Precedence: exact path,
+   * then constrained patterns, then unconstrained ones.
    */
   routes: Record<string, RouteConfig>;
   store?: "auto" | "memory" | "global-config";
@@ -92,11 +96,13 @@ export function resolveConfig(config: EvolveConfig): ResolvedConfig {
     const path = normalizePath(raw);
     if (path.split("/")[1]?.startsWith("ev_"))
       throw new Error(`[evolve] route "${raw}" can't start with ev_`);
-    if (isPattern(path)) {
-      const p = compilePattern(path);
-      if (typeof p === "string") throw new Error(`[evolve] route "${raw}": ${p}`);
-    } else if (/[[\]*?#:]/.test(path))
-      throw new Error(`[evolve] route "${raw}" must be a path or a pattern like /lp/:slug`);
+    const bad = routeKeyError(path);
+    if (bad)
+      throw new Error(
+        isPattern(path)
+          ? `[evolve] route "${raw}": ${bad}`
+          : `[evolve] route "${raw}" must be a path or a pattern like /lp/:slug`,
+      );
     if (route.mode !== "static" && route.mode !== "dynamic") {
       throw new Error(`[evolve] route "${raw}": mode must be "static" or "dynamic"`);
     }
