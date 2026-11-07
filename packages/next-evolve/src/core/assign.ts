@@ -60,13 +60,15 @@ export type Assignment = {
  * Assigns a visitor to the experiments on `path` (spec §6.3). Pure: no I/O.
  * Sticky: an active assignment is kept. Completed experiments render their
  * winner and aren't counted. Cookie entries for experiments no longer in the
- * bundle are pruned.
+ * bundle are pruned. `forced` (UTM rules, D76) renders a variant for an
+ * experiment, counted, without drawing or touching its `evolve_a` entry.
  */
 export function assign(
   bundle: BundlePayload,
   path: string,
   cookie: ReadonlyMap<string, string>,
   rand: Draw,
+  forced?: ReadonlyMap<string, { var: string }>,
 ): Assignment {
   const { experiments, routes } = bundle.routing;
   const assigned = new Map<string, string>();
@@ -82,6 +84,11 @@ export function assign(
     if (!e) continue;
     if (e.status === "completed") {
       pairs.push({ exp, var: e.winner!, counted: false });
+      continue;
+    }
+    const f = forced?.get(exp);
+    if (f) {
+      pairs.push({ exp, var: f.var, counted: true });
       continue;
     }
     const a = assigned.get(exp);

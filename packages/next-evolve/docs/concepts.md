@@ -57,7 +57,18 @@ Direct requests to `/ev_…` paths return 404; they exist only as rewrite target
 - **Consent:** set `consent: (req) => boolean` in `evolve.config.ts`. When it returns `false` the visitor gets control and no cookies.
 - **No bundle** (new site with nothing started, or an expired bundle): control and no cookies.
 - **Preview links** from the dashboard force a variant for one browser session and record nothing.
+- **UTM rules** (since 0.8) override the assignment for a session: see [UTM rules](#utm-rules).
 - Paused experiments are removed from the bundle; their visitors see control. Completed experiments serve the winner to everyone, uncounted, until you ship it in code and archive the experiment.
+
+## UTM rules
+
+A rule in the dashboard says "visitors matching these conditions see variant V of this experiment", for example `utm_campaign = spring-sale → "Spring"`. Rules travel in the bundle (`rules`, protocol 1.3.0) and the proxy evaluates them with no network call, before the normal assignment:
+
+- **Conditions** (all must hold): `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content` (from the query string), `ref` (the referrer's host, without `www.`), `country` (from `geoHeader`) and `device` (`mobile`, `tablet` or `desktop`, from the user agent). Operators: equals, one of, starts with (all three ignore case) and regular expression (as written). An experiment has up to 20 rules; the first that matches wins.
+- **Session:** a match sets the session cookie `evolve_r`, so the visitor keeps the rule's variant on later pages without the UTM until the browser session ends. The rule doesn't change `evolve_a`: afterwards the visitor is back on their normal arm.
+- **Counting:** a rule visitor's exposure is stored with `segment` = the rule id. The cloud reports each rule's results separately; main results, the bandit and guardrails use the `main` segment only. A visitor who was already counted in the main experiment stays there (first exposure wins).
+- Bots and visitors without consent get control, as always; a preview link wins over rules. A rule the SDK can't evaluate (for example an invalid regular expression) is skipped. Older SDKs ignore rules and serve the normal assignment.
+- With `cdnRouting`, a rule render sets no CDN route cookie, so the session's later views keep going through the proxy. A visitor who already holds a fresh route cookie (at most `maxAgeSeconds`) is served from the CDN until it expires, without evaluating rules.
 
 ## Where things run
 

@@ -36,6 +36,11 @@ export type EvolveConfig = {
    * Needs `evolveRewrites()` in next.config and `evolveMatcher()` in proxy.ts.
    */
   cdnRouting?: boolean | { maxAgeSeconds?: number };
+  /**
+   * Request header with the visitor's ISO-3166 alpha-2 country, for UTM rules
+   * on `country` (default `x-vercel-ip-country`; e.g. `cf-ipcountry` on Cloudflare).
+   */
+  geoHeader?: string;
   debug?: boolean;
 };
 
@@ -50,6 +55,7 @@ export type ResolvedConfig = {
   consent: ((req: Request) => boolean) | undefined;
   botPatterns: readonly string[];
   cdnRouting: { maxAgeSeconds: number } | null;
+  geoHeader: string;
   debug: boolean;
 };
 
@@ -110,6 +116,10 @@ export function resolveConfig(config: EvolveConfig): ResolvedConfig {
   ) {
     throw new Error(`[evolve] retentionDays must be an integer from ${MIN_RETENTION_DAYS} to 3650`);
   }
+  const geoHeader = (config.geoHeader ?? "x-vercel-ip-country").toLowerCase();
+  if (!/^[a-z0-9-]{1,64}$/.test(geoHeader)) {
+    throw new Error("[evolve] geoHeader must be a header name like x-vercel-ip-country");
+  }
   const r: ResolvedConfig = {
     routes,
     store: config.store ?? "auto",
@@ -125,6 +135,7 @@ export function resolveConfig(config: EvolveConfig): ResolvedConfig {
     consent: config.consent,
     botPatterns: config.bots?.extraPatterns ?? [],
     cdnRouting,
+    geoHeader,
     debug: config.debug ?? dev,
   };
   resolved.set(config, r);

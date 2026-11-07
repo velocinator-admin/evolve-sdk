@@ -20,6 +20,7 @@ import {
   serializeAssignments,
 } from "../core/cookies";
 import { logRateLimited } from "../core/log";
+import { RULE_COOKIE, requestFacts, resolveRules } from "../core/rules";
 import { onDemand } from "../store/on-demand";
 import { coldStart, getBundleStore, getSiteIdentity, type RuntimeOptions } from "../store/runtime";
 
@@ -74,6 +75,7 @@ export function applyEvolve(
     const bundle = store?.peek(event ? (p) => event.waitUntil(p) : undefined) ?? null;
 
     let code = CONTROL_CODE;
+    let ruled = false;
     const setCookies: [name: string, value: string, session?: boolean, maxAge?: number][] = [];
 
     // Preview links: a signed token forces a code; nothing is assigned or counted.
@@ -96,20 +98,27 @@ export function applyEvolve(
       }
       const known = req.cookies.get(ANON_COOKIE)?.value;
       const anon = known || newAnonId();
-      const a = assign(bundle, path, cookie, opts.random ?? visitorDraw(anon));
-      code = encodeCode(a.pairs);
-      const running = (bundle.routing.routes[path] ?? []).some(
-        (e) => bundle.routing.experiments[e]?.status === "running",
+      const exps = bundle.routing.routes[path] ?? [];
+      // UTM rules (D76): a still-valid rule from this session, else the first match.
+      const rules = resolveRules(bundle, exps, req.cookies.get(RULE_COOKIE)?.value, () =>
+        requestFacts(req.nextUrl, req.headers, cfg.geoHeader),
       );
+      ruled = rules.forced.size > 0;
+      const a = assign(bundle, path, cookie, opts.random ?? visitorDraw(anon), rules.forced);
+      code = encodeCode(a.pairs);
+      const running = exps.some((e) => bundle.routing.experiments[e]?.status === "running");
       if (running) {
         routed = true;
         if (!known) setCookies.push([ANON_COOKIE, anon]);
         if (a.changed) setCookies.push([ASSIGN_COOKIE, serializeAssignments(a.assigned)]);
+        if (rules.cookie !== null) setCookies.push([RULE_COOKIE, rules.cookie, true]);
       }
     }
     // CDN fast path: later views of this route (until the cookie expires) are
     // rewritten by next.config from the cookie, without invoking the proxy.
-    if (routed && isStatic && cfg.cdnRouting)
+    // Not for a rule render: the session's rule lives in `evolve_r`, so later
+    // views must keep going through the proxy.
+    if (routed && !ruled && isStatic && cfg.cdnRouting)
       setCookies.push([cdnCookieName(path), code, false, cfg.cdnRouting.maxAgeSeconds]);
     res = isStatic ? rewrite(req, code, path) : passThrough(req, code, path);
     if (setCookies.length) {

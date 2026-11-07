@@ -21,6 +21,7 @@ export default defineConfig({
   consent: undefined, // (req: Request) => boolean
   bots: { extraPatterns: [] },
   cdnRouting: false, // or true, or { maxAgeSeconds: 60 } (since 0.6)
+  geoHeader: "x-vercel-ip-country", // country for UTM rules (since 0.8)
   debug: process.env.NODE_ENV !== "production",
 });
 ```
@@ -40,6 +41,7 @@ export default defineConfig({
 | `consent`                      | Return `false` to serve control and set no cookies (e.g. before cookie consent)                                                                                                                                                                                                                                                                                                               |
 | `bots.extraPatterns`           | Extra user-agent patterns (case-insensitive regular expressions) treated as bots                                                                                                                                                                                                                                                                                                              |
 | `cdnRouting`                   | Opt-in (since 0.6), static-mode routes only: repeat views within `maxAgeSeconds` (default: `sync.pollSeconds`) are served from the CDN without running the proxy. A pause or rollback can then take up to `maxAgeSeconds` to reach a returning visitor. Needs `evolveRewrites()` in `next.config` and the `evolveMatcher()` literal in `proxy.ts`. See [CDN routing](#cdn-routing-cdnrouting) |
+| `geoHeader`                    | Since 0.8. Request header holding the visitor's ISO-3166 alpha-2 country, read only by UTM rules on `country`. Default `x-vercel-ip-country`; `cf-ipcountry` on Cloudflare. See [UTM rules](concepts.md#utm-rules) |
 | `debug`                        | Extra logging                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## Environment variables
@@ -71,6 +73,7 @@ Test-only variables (`EVOLVE_UNSAFE_TEST_PUBLIC_KEY`, `EVOLVE_UNSAFE_ALLOW_TEST_
 | `evolve_id`       | Random visitor id                                                               | First visit to a tested route with a running experiment                                                  |
 | `evolve_a`        | The visitor's assignments (`experiment:variant`, up to 20)                      | Same, and when an assignment changes                                                                     |
 | `evolve_pv`       | A signed preview token                                                          | Opening a dashboard preview link (session cookie)                                                        |
+| `evolve_r`        | UTM rules matched this session (`experiment:rule`, up to 20), session cookie    | Since 0.8: when a [UTM rule](concepts.md#utm-rules) matches                                              |
 | `evolve_r_<hash>` | The variant code for one route (`ev_…`), `Max-Age` = `cdnRouting.maxAgeSeconds` | Only with `cdnRouting`: when the proxy routes a visitor on a static-mode route with a running experiment |
 
 All are `HttpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` over https. None is set for bots, before consent, or without a valid bundle.
