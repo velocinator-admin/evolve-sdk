@@ -1,6 +1,0 @@
----
-"next-evolve": minor
-"@next-evolve/protocol": minor
----
-
-Per-page values in variant copy (TPL-1.2, protocol 1.4.0). Variant string props may contain `{var}` placeholders, filled per page from the matched route params (`{name}` on `/:name(…)`, catch-alls joined with `/`; static mode from the page params, dynamic mode from a proxy-set `x-evolve-vars` request header that a visitor can't supply) and from the new optional `<Optimizable vars>` prop for CMS data (`vars={{ fullName: person.fullName }}`). A variant that uses a var the page doesn't have (or a value over 500 characters) renders control for that view, marked not counted. Region registrations carry the new optional `vars: string[]`: the var names the region offers on that path, never values (omitted when empty). The aggregate request may name experiments in `pages`; the answer then carries `pages: [{ exp, n }]`, the number of distinct page paths with exposures up to `asOf` (a count only), for "pooled across N pages". `@next-evolve/protocol` adds `placeholdersIn`, `fillPlaceholders`, `VAR_NAME_RE`, `MAX_REGION_VARS` (also as `@next-evolve/protocol/template`), `PAGES_ERROR_GOAL`, and contract fixtures that 1.3.0 readers parse and verify.

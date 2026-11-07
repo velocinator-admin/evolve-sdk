@@ -1,5 +1,20 @@
 # next-evolve
 
+## 0.9.0
+
+### Minor Changes
+
+- 87df7e4: Regex-constrained route params (TPL-1.1, protocol 1.4.0). Route keys in `evolve.config.ts` and the bundle may constrain a single-segment param with a regex, Next matcher style: `/:name([A-Z][A-Za-z]*-[A-Za-z-]+)` serves `/Christopher-G` but not `/pricing`; `/:name/:state/:city/:id(z[0-9]+)`. The constraint matches the whole raw segment, is at most 200 characters, and is refused (at config load, and by the cloud) when it uses capturing groups, backreferences, lookarounds, anchors, nested quantifiers or `|` inside a repeated group. Matching runs on a linear-time NFA, compiled once per bundle; the proxy benchmark includes constrained routes. Precedence: exact path → constrained pattern → unconstrained pattern → D77 specificity. Static mode maps `/:name(…)` to `app/[evolve]/[name]`, `evolveMatcher` emits the key as-is (Next's matcher accepts it), and `evolveMetadata` fills it into the canonical URL. `@next-evolve/protocol` exports the grammar, validator and matcher (`parseRouteKey`, `routeKeyError`, `constraintError`, `compileRoute`, `compareRoutes`, `exampleRoutePaths`; also as the Node-free subpath `@next-evolve/protocol/routes`) for the cloud. next-evolve 0.8 drops a constrained bundle key (it never matches, so those pages serve control), which a test against the released 0.8.0 package pins.
+- 2c5328a: Per-page values in variant copy (TPL-1.2, protocol 1.4.0). Variant string props may contain `{var}` placeholders, filled per page from the matched route params (`{name}` on `/:name(…)`, catch-alls joined with `/`; static mode from the page params, dynamic mode from a proxy-set `x-evolve-vars` request header that a visitor can't supply) and from the new optional `<Optimizable vars>` prop for CMS data (`vars={{ fullName: person.fullName }}`). A variant that uses a var the page doesn't have (or a value over 500 characters) renders control for that view, marked not counted. Region registrations carry the new optional `vars: string[]`: the var names the region offers on that path, never values (omitted when empty). The aggregate request may name experiments in `pages`; the answer then carries `pages: [{ exp, n }]`, the number of distinct page paths with exposures up to `asOf` (a count only), for "pooled across N pages". `@next-evolve/protocol` adds `placeholdersIn`, `fillPlaceholders`, `VAR_NAME_RE`, `MAX_REGION_VARS` (also as `@next-evolve/protocol/template`), `PAGES_ERROR_GOAL`, and contract fixtures that 1.3.0 readers parse and verify.
+
+### Patch Changes
+
+- 993b924: Collect answers a beacon right away when its batch names a pair the bundle doesn't route, and records the batch after the response (`after()`) once the on-demand refresh is done. Before, the beacon request stayed open for up to 12 s. After a pause, pages a visitor still had (with `cdnRouting`, for the route cookie's lifetime) sent such beacons, and on HTTP/1.1 each one held one of the browser's 6 connections to the site, so the visitor's next page loads stalled for several seconds.
+- 9284640: `init` with `cacheComponents: true` sets up static mode (the default) instead of switching to dynamic. It writes each moved page the way Next allows there: the default export is a `"use cache"` page with `cacheLife("hours")` that renders the `withEvolve` page, with no `revalidate` or `dynamicParams` exports. A page that reads `searchParams`, `cookies()` or `headers()`, a `page.ts` file and a page with its own segment config stay in dynamic mode, and init says why. `--mode dynamic` works as before. `--cdn-routing` with `cacheComponents` is refused for now.
+- Updated dependencies [87df7e4]
+- Updated dependencies [2c5328a]
+  - @next-evolve/protocol@1.4.0
+
 ## 0.8.0
 
 ### Minor Changes
