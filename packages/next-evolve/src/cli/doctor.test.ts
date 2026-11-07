@@ -66,8 +66,13 @@ const CONFIG: EvolveConfig = {
   routes: { "/": { mode: "static" }, "/pricing": { mode: "static" } },
 } as EvolveConfig;
 
+/** Response headers the fake app (https://app.example.com) answers with (T23.4). */
+let appHeaders: Record<string, string> = { server: "Vercel" };
+
 /** The cloud's connection test answering "all good" (no real app to reach here). */
 const testOk = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  if (String(input).startsWith("https://app.example.com/"))
+    return new Response("ok", { headers: appHeaders });
   if (String(input).endsWith("/v1/site/test"))
     return Response.json({
       ok: true,
@@ -238,9 +243,9 @@ describe("next-evolve doctor (spec §16.2)", () => {
     );
     expect(by(await doctor(dir), "EvolveScript").status).toBe("fail");
 
-    // cacheComponents → warn under Next.js.
+    // cacheComponents is supported (T23.3): no warning under Next.js.
     writeFileSync(join(dir, "next.config.ts"), "export default { cacheComponents: true };\n");
-    expect(by(await doctor(dir), "Next.js")).toMatchObject({ status: "warn" });
+    expect(by(await doctor(dir), "Next.js")).toMatchObject({ status: "ok" });
 
     // Cloud can't reach the app; no app URL yet only warns.
     c = await doctor(dir, { fetch: undefined });
@@ -252,8 +257,87 @@ describe("next-evolve doctor (spec §16.2)", () => {
     });
 
     // Off Vercel: CDN warning.
+    appHeaders = {};
     c = await doctor(dir, {}, { VERCEL: undefined });
     expect(by(c, "CDN")).toMatchObject({ status: "warn", detail: expect.stringMatching(/CDN/) });
+    appHeaders = { server: "Vercel" };
+  });
+
+  it("CDN: detects Cloudflare and Netlify from the live site's headers (T23.4)", async () => {
+    const dir = await healthy();
+    const cdn = async (headers: Record<string, string>, env = { VERCEL: undefined }) => {
+      appHeaders = headers;
+      return by(await doctor(dir, {}, env), "CDN");
+    };
+    try {
+      // The live site answers through Cloudflare: warn, with the guide.
+      expect(await cdn({ server: "cloudflare", "cf-ray": "8f1-IAD" })).toMatchObject({
+        status: "warn",
+        detail: expect.stringMatching(
+          /Cloudflare is in front of https:\/\/app\.example\.com.*\/, \/pricing.*hosting\.md#cloudflare/,
+        ),
+      });
+      // cf-ray alone is enough; on Vercel behind Cloudflare it still warns.
+      expect((await cdn({ "cf-ray": "x" }, { VERCEL: "1" } as never)).status).toBe("warn");
+      // A tested route served from Cloudflare's cache: one variant for everyone.
+      expect(
+        await cdn({ server: "cloudflare", "cf-ray": "x", "cf-cache-status": "HIT" }),
+      ).toMatchObject({ status: "fail", detail: expect.stringMatching(/cf-cache-status: HIT/) });
+      expect((await cdn({ server: "cloudflare", "cf-cache-status": "DYNAMIC" })).status).toBe(
+        "warn",
+      );
+      // Netlify: beta, unverified.
+      expect(await cdn({ server: "Netlify", "x-nf-request-id": "01J" })).toMatchObject({
+        status: "warn",
+        detail: expect.stringMatching(/beta, not verified/),
+      });
+      // Vercel's headers count as Vercel even when doctor runs locally.
+      expect(await cdn({ server: "Vercel", "x-vercel-id": "iad1::x" })).toMatchObject({
+        status: "ok",
+        detail: "Vercel",
+      });
+      // No CDN headers: the generic off-Vercel warning.
+      expect((await cdn({ server: "nginx" })).detail).toMatch(/^not on Vercel/);
+    } finally {
+      appHeaders = { server: "Vercel" };
+    }
+  });
+
+  it('cacheComponents + static mode: segment config fails, a "use cache" page passes (T23.3)', async () => {
+    const dir = await healthy();
+    writeFileSync(join(dir, "next.config.ts"), "export default { cacheComponents: true };\n");
+    // init's classic static pages export revalidate/dynamicParams and don't cache themselves.
+    let pages = by(await doctor(dir), "Pages");
+    expect(pages.status).toBe("fail");
+    expect(pages.detail).toMatch(
+      /exports revalidate, dynamicParams, which cacheComponents rejects/,
+    );
+    expect(pages.detail).toMatch(/no "use cache"/);
+    const cached = (path: string) => `import { cacheLife } from "next/cache";
+import { type EvolvePageProps, evolveMetadata, evolveStaticParams, withEvolve } from "next-evolve";
+
+export const generateStaticParams = evolveStaticParams;
+export const generateMetadata = evolveMetadata("${path}");
+
+const EvolvePage = withEvolve(() => null, { path: "${path}" });
+
+export default async function Page({ params }: EvolvePageProps) {
+  "use cache";
+  cacheLife("hours");
+  return <EvolvePage params={params} />;
+}
+`;
+    writeFileSync(join(dir, "app/[evolve]/page.tsx"), cached("/"));
+    pages = by(await doctor(dir), "Pages");
+    expect(pages.detail).not.toMatch(/^\/:/);
+    expect(pages.detail).toMatch(/\/pricing/);
+    writeFileSync(join(dir, "app/[evolve]/pricing/page.tsx"), cached("/pricing"));
+    const c = await doctor(dir);
+    expect(by(c, "Pages")).toMatchObject({ status: "ok" });
+    expect(by(c, "Next.js")).toMatchObject({ status: "ok" });
+    // Without cacheComponents, the same pages are fine too.
+    writeFileSync(join(dir, "next.config.ts"), "export default {};\n");
+    expect(by(await doctor(dir), "Pages")).toMatchObject({ status: "ok" });
   });
 
   it("the command prints each check and exits 1 on a failure", async () => {
@@ -315,7 +399,9 @@ describe("next-evolve doctor (spec §16.2)", () => {
     });
 
     // Off Vercel the CDN warning says why it matters more.
+    appHeaders = {};
     c = await cdn({}, { VERCEL: undefined });
+    appHeaders = { server: "Vercel" };
     expect(by(c, "CDN").detail).toMatch(/cdnRouting/);
   });
 

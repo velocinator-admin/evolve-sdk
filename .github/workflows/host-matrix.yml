@@ -1,0 +1,228 @@
+# T23.2 host matrix (HOST-1, docs/perf/host-matrix.md): every night the
+# fixture e2e and the request-path benchmark on each host Evolve supports,
+# a per-host table in the run summary, and an issue when a host fails.
+#   - node:   `next start`, full fixture e2e + perf.ts (fake cloud, customer Postgres)
+#   - docker: the `output: "standalone"` image, full fixture e2e + perf.ts
+#   - vercel: the production fixture (https://fixture.evolveab.com): host smoke
+#             + a slow perf.ts against the baseline project. No secrets: public pages only.
+#   - netlify, cloudflare: listed as skipped (need accounts, parked).
+# No secrets beyond GITHUB_TOKEN (issues).
+name: Host matrix
+
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+    inputs:
+      vercel_url:
+        description: Vercel fixture URL (default https://fixture.evolveab.com)
+        required: false
+      vercel_baseline_url:
+        description: Vercel baseline URL (default https://evolve-fixture-baseline.vercel.app)
+        required: false
+      open_issue:
+        description: Open/update an issue on failure (manual runs)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-matrix
+  cancel-in-progress: false
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  NEXT_TELEMETRY_DISABLED: 1
+
+jobs:
+  local:
+    name: ${{ matrix.host }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [node, docker]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: evolve
+          POSTGRES_PASSWORD: evolve
+          POSTGRES_DB: customer
+        ports: ["54329:5432"]
+        options: >-
+          --health-cmd "pg_isready -U evolve -d customer"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      EVOLVE_DATABASE_URL: postgres://evolve:evolve@localhost:54329/customer
+      HOST: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Packages first, then link their bins (see ci.yml), then the fixture.
+      - run: pnpm turbo run build --filter='./packages/*'
+      - run: pnpm install --frozen-lockfile --offline
+      - run: pnpm --filter fixture build
+      - run: pnpm --filter fixture exec playwright install --with-deps chromium
+      - name: Build the standalone images
+        if: matrix.host == 'docker'
+        run: |
+          docker build -f apps/fixture/Dockerfile.standalone -t evolve-fixture-standalone .
+          docker build -f apps/fixture/Dockerfile.standalone --build-arg EVOLVE_PERF_BASELINE=1 \
+            -t evolve-fixture-standalone-baseline .
+      - name: Fixture e2e
+        id: e2e
+        continue-on-error: true
+        working-directory: apps/fixture
+        env:
+          E2E_APP_HOST: ${{ matrix.host }}
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/e2e.json
+        run: pnpm exec playwright test --retries 1 --reporter=github,json
+      - name: Benchmark
+        id: perf
+        continue-on-error: true
+        working-directory: apps/fixture
+        run: node --experimental-strip-types --no-warnings scripts/perf.ts --host "$HOST" --out "$GITHUB_WORKSPACE/perf.json"
+      - name: Record
+        if: always()
+        run: |
+          node --experimental-strip-types --no-warnings apps/fixture/scripts/host-matrix.ts record \
+            --host "$HOST" --e2e e2e.json --perf perf.json --out "host-$HOST.json"
+          cat "host-$HOST.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-${{ matrix.host }}
+          path: host-${{ matrix.host }}.json
+      - uses: actions/upload-artifact@v4
+        if: failure() || steps.e2e.outcome == 'failure'
+        with:
+          name: playwright-${{ matrix.host }}
+          path: apps/fixture/test-results
+      - name: Fail on a failed step
+        if: steps.e2e.outcome == 'failure' || steps.perf.outcome == 'failure'
+        run: |
+          echo "::error::$HOST: e2e ${{ steps.e2e.outcome }}, benchmark ${{ steps.perf.outcome }}"
+          exit 1
+
+  vercel:
+    name: vercel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      URL: ${{ inputs.vercel_url || 'https://fixture.evolveab.com' }}
+      BASELINE: ${{ inputs.vercel_baseline_url || 'https://evolve-fixture-baseline.vercel.app' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The smoke spec imports e2e/env.ts, which imports the fake cloud's test keys.
+      - run: pnpm turbo run build --filter=@next-evolve/fake-cloud...
+      - run: pnpm --filter fixture exec playwright install --with-deps chromium
+      - name: Host smoke
+        id: e2e
+        continue-on-error: true
+        working-directory: apps/fixture
+        env:
+          HOST_URL: ${{ env.URL }}
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/e2e.json
+        run: pnpm exec playwright test -c playwright.host.config.ts --reporter=github,json
+      # Slow on purpose (~0.5 req/s): Vercel's DDoS mitigation challenges one
+      # IP's fast sequential requests. Budget: spec §6.6 (≈ +20 ms first view
+      # on Vercel; in-proxy < 1 ms). Challenged samples are left out.
+      - name: Benchmark
+        id: perf
+        continue-on-error: true
+        working-directory: apps/fixture
+        run: |
+          node --experimental-strip-types --no-warnings scripts/perf.ts \
+            --with "$URL" --without "$BASELINE" --requests 40 --warmup 4 \
+            --only /pricing --only "/ static, returning" --skip-load \
+            --interval-ms 4000 --budget-ms 40 --out "$GITHUB_WORKSPACE/perf.json"
+      - name: Record
+        if: always()
+        run: |
+          node --experimental-strip-types --no-warnings apps/fixture/scripts/host-matrix.ts record \
+            --host vercel --e2e e2e.json --perf perf.json --out host-vercel.json
+          cat host-vercel.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-vercel
+          path: host-vercel.json
+      - name: Fail on a failed step
+        if: steps.e2e.outcome == 'failure' || steps.perf.outcome == 'failure'
+        run: |
+          # A run Vercel challenged throughout is inconclusive, not a failure.
+          status=$(node -e 'const r=require("./host-vercel.json");const s=[r.e2e?.status,r.perf?.status];console.log(s.includes("fail")?"fail":"ok")')
+          [ "$status" = ok ] && { echo "::warning::vercel: challenged, see the summary"; exit 0; }
+          echo "::error::vercel: smoke ${{ steps.e2e.outcome }}, benchmark ${{ steps.perf.outcome }}"
+          exit 1
+
+  summary:
+    name: Summary
+    needs: [local, vercel]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: apps/fixture/scripts
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: host-*
+          merge-multiple: true
+          path: hosts
+      - name: Table
+        id: table
+        run: |
+          set +e
+          node --experimental-strip-types --no-warnings apps/fixture/scripts/host-matrix.ts render hosts/host-*.json > table.md
+          code=$?
+          set -e
+          # A job that died before recording has no row: count it as failed.
+          for h in node docker vercel; do
+            [ -f "hosts/host-$h.json" ] || { echo "| $h | ❌ fail | no result (the job failed before recording) | — | — | |" >> table.md; code=1; }
+          done
+          {
+            echo "### Host matrix: $(date -u '+%F %H:%M') UTC"
+            echo
+            cat table.md
+            echo
+            echo "In-proxy = \`Server-Timing: evolve;dur\` p95; added = Evolve minus baseline TTFB at p95 (worst scenario). Budgets: spec §6.6."
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat table.md
+          echo "failed=$([ $code = 0 ] && [ '${{ needs.local.result }}' != failure ] && [ '${{ needs.vercel.result }}' != failure ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+      - name: Open or update the issue
+        if: steps.table.outputs.failed == 'true' && (github.event_name == 'schedule' || inputs.open_issue)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Host matrix failing"
+          { echo "Run: $RUN"; echo; cat table.md; } > body.md
+          n=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --repo "$GITHUB_REPOSITORY" --body-file body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file body.md
+          fi

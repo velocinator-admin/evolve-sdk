@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+# T23.1 host matrix: the fixture as an `output: "standalone"` image (Next's
+# self-hosting recipe: `node server.js`, no node_modules install at runtime).
+# Build from the repo root:
+#   docker build -f apps/fixture/Dockerfile.standalone -t evolve-fixture-standalone .
+#   docker build -f apps/fixture/Dockerfile.standalone --build-arg EVOLVE_PERF_BASELINE=1 \
+#     -t evolve-fixture-standalone-baseline .      # perf baseline (no Evolve)
+# EVOLVE_SECRET_KEY reaches the build as an optional BuildKit secret (never an
+# image layer): `next-evolve pull` writes the build bundle. The image doesn't
+# migrate the customer DB; run `npx next-evolve migrate` in your deploy step.
+FROM node:24.22.1-alpine AS build
+RUN corepack enable
+WORKDIR /repo
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm turbo run build --filter='fixture^...'
+WORKDIR /repo/apps/fixture
+ARG EVOLVE_PERF_BASELINE=
+ENV EVOLVE_STANDALONE=1 EVOLVE_PERF_BASELINE=${EVOLVE_PERF_BASELINE} NEXT_TELEMETRY_DISABLED=1
+RUN --mount=type=secret,id=evolve_secret_key,env=EVOLVE_SECRET_KEY pnpm run build
+# The standalone tree plus the static assets Next leaves for a CDN to serve.
+RUN DIST=$([ "$EVOLVE_PERF_BASELINE" = 1 ] && echo .next-baseline || echo .next) \
+  && mkdir /out && cp -r "$DIST/standalone/." /out/ \
+  && cp -r "$DIST/static" "/out/apps/fixture/$DIST/static"
+
+FROM node:24.22.1-alpine
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000
+# The ISR cache (static mode's variant pages) is written under .next/server.
+COPY --from=build --chown=node:node /out ./
+USER node
+EXPOSE 3000
+CMD ["node", "apps/fixture/server.js"]

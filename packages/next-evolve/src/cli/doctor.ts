@@ -13,6 +13,7 @@ import { fetchBundle, isSiteDeleted } from "../store/fetch";
 import { cloudUrl, getSiteInfo, runCloudTest } from "./cloud";
 import { detectProject } from "./detect";
 import { fileEnv } from "./env-file";
+import { probeHost } from "./host-probe";
 import { type AppModules, loadAppModules, reexecWithTypes } from "./load-app";
 import { evalMatcher, formatMatcher, matcherSource } from "./matcher";
 import { BUILD_BUNDLE_PATH, readBuildBundle } from "./pull";
@@ -83,6 +84,27 @@ const read = (p: string) => {
     return null;
   }
 };
+
+/**
+ * Static mode with `cacheComponents` (T23.3, HOST-2): Next rejects the segment
+ * config the classic static page exports, and the page must cache itself per
+ * variant code with "use cache" (+ cacheLife), keyed on `params`.
+ */
+export function cacheComponentsPage(path: string, page: string, src: string): string[] {
+  const problems: string[] = [];
+  const segment = ["revalidate", "dynamicParams"].filter((k) =>
+    new RegExp(`export\\s+const\\s+${k}\\b`).test(src),
+  );
+  if (segment.length)
+    problems.push(
+      `${path}: ${page} exports ${segment.join(", ")}, which cacheComponents rejects; remove it and cache the page with "use cache" + cacheLife (see docs/concepts.md)`,
+    );
+  if (!/["']use cache["']/.test(src))
+    problems.push(
+      `${path}: ${page} has no "use cache": with cacheComponents, add "use cache" and cacheLife("hours") to the default export so each variant code is cached (see docs/concepts.md)`,
+    );
+  return problems;
+}
 
 export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
   const cwd = deps.cwd ?? process.cwd();
@@ -278,9 +300,11 @@ export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
       const page = ["tsx", "jsx", "ts", "js"]
         .map((e) => `${app}/[evolve]${seg}/page.${e}`)
         .find((f) => existsSync(join(cwd, f)));
+      const src = page ? (read(join(cwd, page)) ?? "") : "";
       if (!page) problems.push(`${r.path}: no ${app}/[evolve]${seg}/page (run init again)`);
-      else if (!read(join(cwd, page))?.includes("withEvolve"))
+      else if (!src.includes("withEvolve"))
         problems.push(`${r.path}: ${page} isn't wrapped with withEvolve()`);
+      else if (d.cacheComponents) problems.push(...cacheComponentsPage(r.path, page, src));
     }
     checks.push(problems.length ? fail("Pages", problems.join("; ")) : ok("Pages"));
   }
@@ -323,18 +347,47 @@ export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
     }
   }
 
-  // CDN
+  // CDN (T23.4): who serves the live site, from its headers; then the env.
   const onVercel = Boolean(env.VERCEL) || existsSync(join(cwd, ".vercel/project.json"));
-  checks.push(
-    onVercel
-      ? ok("CDN", "Vercel")
-      : warn(
-          "CDN",
-          cdnOn
-            ? "not on Vercel, with cdnRouting on: returning visitors are served without the proxy's no-store header, so a shared CDN in front of the app must not cache Evolve routes by URL alone (or turn cdnRouting off)"
-            : "not on Vercel: if a CDN caches pages, it must not cache Evolve routes by URL alone (the variant comes from the evolve cookie)",
-        ),
-  );
+  const siteUrl = appUrl ?? env.EVOLVE_APP_URL ?? null;
+  const probe = siteUrl
+    ? await probeHost(siteUrl, routes[0]?.path ?? "/", deps.fetch ?? fetch)
+    : null;
+  const tested = routes.map((r) => r.path).join(", ") || "your tested routes";
+  if (probe?.host === "cloudflare")
+    checks.push(
+      probe.cacheHit
+        ? fail(
+            "CDN",
+            `Cloudflare served ${probe.url} from its cache (cf-cache-status: HIT), so every visitor gets the variant it cached. Add a cache rule that bypasses the cache for ${tested} (next-evolve docs: hosting.md#cloudflare)`,
+          )
+        : warn(
+            "CDN",
+            `Cloudflare is in front of ${siteUrl}: no cache rule may cache ${tested} by URL alone ("Cache Everything" does), or one variant is served to everyone. See next-evolve docs: hosting.md#cloudflare`,
+          ),
+    );
+  else if (probe?.host === "netlify")
+    checks.push(
+      probe.cacheHit
+        ? fail(
+            "CDN",
+            `Netlify served ${probe.url} from its cache, so every visitor gets the variant it cached; don't cache tested routes (next-evolve docs: hosting.md#netlify)`,
+          )
+        : warn(
+            "CDN",
+            `Netlify (${siteUrl}): supported in beta, not verified by Evolve's host matrix yet. See next-evolve docs: hosting.md#netlify`,
+          ),
+    );
+  else if (onVercel || probe?.host === "vercel") checks.push(ok("CDN", "Vercel"));
+  else
+    checks.push(
+      warn(
+        "CDN",
+        cdnOn
+          ? "not on Vercel, with cdnRouting on: returning visitors are served without the proxy's no-store header, so a shared CDN in front of the app must not cache Evolve routes by URL alone (or turn cdnRouting off)"
+          : "not on Vercel: if a CDN caches pages, it must not cache Evolve routes by URL alone (the variant comes from the evolve cookie)",
+      ),
+    );
   return checks;
 }
 

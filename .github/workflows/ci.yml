@@ -81,6 +81,7 @@ jobs:
       - run: pnpm --filter fixture exec playwright install --with-deps chromium
       - run: pnpm --filter fixture test:e2e
       - run: pnpm --filter fixture-next15 test:e2e
+      - run: pnpm --filter fixture-cc test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

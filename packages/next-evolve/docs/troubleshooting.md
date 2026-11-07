@@ -13,7 +13,7 @@ Start with `npx next-evolve doctor`. It checks the env, key, database, bundle, p
 **A route stayed in dynamic mode.** `init` says why (top-level `[slug]`, route group, `force-dynamic`, `"use client"` page…). Dynamic mode works the same; the page just isn't cached per variant.
 
 **`cacheComponents` errors.**
-- `Route segment config "revalidate" is not compatible with nextConfig.cacheComponents`: the page was set up in static mode. Re-run `npx next-evolve init` with `next-evolve` 0.3.4 or newer (it uses dynamic mode with `cacheComponents`), or by hand: move the page back out of `app/[evolve]/`, remove the `withEvolve`/`evolveStaticParams`/`evolveMetadata` lines and set the route's mode to `"dynamic"`.
+- `Route segment config "revalidate" is not compatible with nextConfig.cacheComponents`: the page was set up in classic static mode. Either keep static mode and switch the page to `"use cache"` + `cacheLife` (remove the `revalidate`/`dynamicParams` exports; see [concepts](concepts.md#static-and-dynamic-mode)), or use dynamic mode: move the page back out of `app/[evolve]/`, remove the `withEvolve`/`evolveStaticParams`/`evolveMetadata` lines and set the route's mode to `"dynamic"`. `doctor` names the pages to fix.
 - `uncached or runtime data … accessed outside of <Suspense>` in `next build`: wrap `<Optimizable>` in `<Suspense>`.
 - `encountered the unstable value Date.now()` in the dev overlay, pointing at `<Optimizable>`: upgrade to `next-evolve` 0.3.5 or newer.
 

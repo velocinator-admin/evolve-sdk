@@ -110,13 +110,9 @@ export function detectProject(root: string): Detection {
       message: 'output: "export" builds a static site; Evolve needs a server (remove it)',
     });
   }
-  if (cacheComponents) {
-    problems.push({
-      level: "warn",
-      message:
-        "cacheComponents is on: Evolve uses dynamic mode (static mode doesn't work with it); wrap <Optimizable> in <Suspense>",
-    });
-  }
+  // cacheComponents is supported (T23.3, HOST-2): dynamic mode wraps
+  // <Optimizable> in <Suspense>; static mode caches each variant code with
+  // "use cache" (doctor's Pages check enforces the page shape).
 
   return {
     root,

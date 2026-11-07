@@ -176,6 +176,8 @@ type Stored = { token: string; payload: BundlePayload };
 export async function startFakeCloud(
   opts: {
     port?: number;
+    /** Interface to listen on (default 127.0.0.1; "0.0.0.0" lets a container reach it). */
+    host?: string;
     key?: TestKeyPair;
     webhookSecrets?: Record<string, string>;
     /** Sites that start out unreachable (see {@link FakeCloud.down}). */
@@ -614,7 +616,9 @@ export async function startFakeCloud(
       res.writeHead(500).end(String(e));
     });
   });
-  await new Promise<void>((resolve) => server.listen(opts.port ?? 0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) =>
+    server.listen(opts.port ?? 0, opts.host ?? "127.0.0.1", resolve),
+  );
   const addr = server.address();
   const port = typeof addr === "object" && addr ? addr.port : opts.port;
 

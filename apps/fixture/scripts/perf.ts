@@ -10,7 +10,11 @@
 //   node --experimental-strip-types apps/fixture/scripts/perf.ts [--requests 2000] [--out file.json]
 //
 // Against two deployed URLs instead (e.g. Vercel): --with https://a… --without https://b…
-// Exits 1 when any scenario adds ≥ 5 ms at p95.
+// T23.1 host matrix: --host docker runs both apps from the standalone images
+// (Dockerfile.standalone: evolve-fixture-standalone, …-baseline) instead of
+// `next start`; --port-base moves the ports (cloud = base + 900).
+// Exits 1 when any scenario adds ≥ --budget-ms (default 5) at p95, its in-proxy
+// p95 is ≥ --proxy-budget-ms (default 1), or a request fails.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -23,10 +27,6 @@ import { appEnv, HUMAN_UA, M1_BUNDLE } from "../e2e/env.ts";
 
 const print = (s: string) => process.stdout.write(`${s}\n`);
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "..");
-const CLOUD_PORT = 4020;
-const EVOLVE_PORT = 3120;
-const BASELINE_PORT = 3121;
-const BUDGET_MS = 5;
 const BOT_UA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
 
 const { values: args } = parseArgs({
@@ -42,8 +42,24 @@ const { values: args } = parseArgs({
     only: { type: "string", multiple: true },
     /** Skip the concurrent load run (a host's DDoS protection may challenge it). */
     "skip-load": { type: "boolean", default: false },
+    /** Local runs: "node" (`next start`) or "docker" (the standalone images). */
+    host: { type: "string", default: "node" },
+    "port-base": { type: "string", default: "3120" },
+    "budget-ms": { type: "string", default: "5" },
+    /** In-proxy (Server-Timing) p95 budget, spec §6.6. */
+    "proxy-budget-ms": { type: "string", default: "1" },
+    /** Pause between samples (a remote host's DDoS protection may challenge a fast run). */
+    "interval-ms": { type: "string", default: "0" },
+    "docker-image": { type: "string", default: "evolve-fixture-standalone" },
   },
 });
+const HOST = args.host === "docker" ? "docker" : "node";
+const EVOLVE_PORT = Number(args["port-base"]);
+const BASELINE_PORT = EVOLVE_PORT + 1;
+const CLOUD_PORT = EVOLVE_PORT + 900;
+const BUDGET_MS = Number(args["budget-ms"]);
+const PROXY_BUDGET_MS = Number(args["proxy-budget-ms"]);
+const INTERVAL_MS = Number(args["interval-ms"]);
 const N = Number(args.requests);
 const WARMUP = Number(args.warmup);
 const C = Number(args.concurrency);
@@ -134,7 +150,10 @@ type ScenarioResult = {
   addedP50: number;
   addedP95: number;
   serverTiming: ReturnType<typeof stats>;
+  samples: number;
   errors: number;
+  /** Non-200s that were a host's bot challenge (Vercel: `x-vercel-mitigated`). */
+  challenged: number;
 };
 
 async function runScenario(
@@ -153,10 +172,17 @@ async function runScenario(
   const wo: number[] = [];
   const st: number[] = [];
   let errors = 0;
+  let challenged = 0;
   for (let i = 0; i < WARMUP + N; i++) {
     const a = await get(withUrl + s.path, headers);
     const b = await get(withoutUrl + target, { "user-agent": ua });
-    if (a.status !== 200 || b.status !== 200) errors++;
+    if (INTERVAL_MS) await new Promise((r) => setTimeout(r, INTERVAL_MS));
+    // A failed or challenged pair is left out of the numbers (a challenge page isn't the app).
+    if (a.status !== 200 || b.status !== 200) {
+      errors++;
+      if (a.headers["x-vercel-mitigated"] || b.headers["x-vercel-mitigated"]) challenged++;
+      continue;
+    }
     if (i < WARMUP) continue;
     w.push(a.ttfb);
     wo.push(b.ttfb);
@@ -173,7 +199,9 @@ async function runScenario(
     addedP50: round(ws.p50 - wos.p50),
     addedP95: round(ws.p95 - wos.p95),
     serverTiming: stats(st),
+    samples: w.length,
     errors,
+    challenged,
   };
 }
 
@@ -208,9 +236,44 @@ function start(cmd: string, argv: string[], env: Record<string, string>, label: 
   children.push(child);
 }
 let stopping = false;
+const containers: string[] = [];
 function stopAll() {
   stopping = true;
   for (const c of children) c.kill();
+  for (const name of containers.splice(0)) {
+    try {
+      execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+    } catch {}
+  }
+}
+
+/** A detached container from `image` on `port`, with `env` (host URLs rewritten to reach the host). */
+function startContainer(image: string, port: number, env: Record<string, string>) {
+  const name = `evolve-perf-${port}`;
+  const toHost = (u: string) =>
+    u.replace(/(\/\/|@)(localhost|127\.0\.0\.1)(?=[:/])/, "$1host.docker.internal");
+  const flags = Object.entries(env).flatMap(([k, v]) => ["-e", `${k}=${toHost(v)}`]);
+  try {
+    execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+  } catch {}
+  execFileSync(
+    "docker",
+    [
+      "run",
+      "-d",
+      "--rm",
+      "--init",
+      "--name",
+      name,
+      "-p",
+      `${port}:3000`,
+      "--add-host=host.docker.internal:host-gateway",
+      ...flags,
+      image,
+    ],
+    { stdio: "ignore" },
+  );
+  containers.push(name);
 }
 process.on("exit", stopAll);
 process.on("SIGINT", () => process.exit(130));
@@ -225,9 +288,9 @@ async function waitFor(check: () => Promise<boolean>, label: string, ms = 60_000
 }
 
 async function startLocal(): Promise<{ withUrl: string; withoutUrl: string }> {
-  if (!existsSync(join(FIXTURE, ".next/BUILD_ID")))
+  if (HOST === "node" && !existsSync(join(FIXTURE, ".next/BUILD_ID")))
     throw new Error("no evolve build: run `pnpm --filter fixture build` first");
-  if (args.rebuild || !existsSync(join(FIXTURE, ".next-baseline/BUILD_ID"))) {
+  if (HOST === "node" && (args.rebuild || !existsSync(join(FIXTURE, ".next-baseline/BUILD_ID")))) {
     console.error("building the baseline (EVOLVE_PERF_BASELINE=1)…");
     execFileSync("pnpm", ["exec", "next", "build"], {
       cwd: FIXTURE,
@@ -239,7 +302,10 @@ async function startLocal(): Promise<{ withUrl: string; withoutUrl: string }> {
   start(
     "node",
     ["../../packages/fake-cloud/dist/cli.js"],
-    { FAKE_CLOUD_PORT: String(CLOUD_PORT) },
+    {
+      FAKE_CLOUD_PORT: String(CLOUD_PORT),
+      ...(HOST === "docker" ? { FAKE_CLOUD_HOST: "0.0.0.0" } : {}),
+    },
     "fake cloud",
   );
   await waitFor(async () => (await fetch(`${cloud}/health`)).ok, "fake cloud");
@@ -250,22 +316,20 @@ async function startLocal(): Promise<{ withUrl: string; withoutUrl: string }> {
   });
   if (!pub.ok) throw new Error(`publish failed: ${pub.status}`);
 
-  const cacheDir = join(FIXTURE, ".evolve-cache/perf");
-  rmSync(cacheDir, { recursive: true, force: true });
-  mkdirSync(cacheDir, { recursive: true });
-  const port = (p: number) => ["exec", "next", "start", "--port", String(p)];
-  start(
-    "pnpm",
-    port(EVOLVE_PORT),
-    {
-      ...appEnv,
-      EVOLVE_CLOUD_URL: cloud,
-      EVOLVE_POLL_SECONDS: "60",
-      EVOLVE_CACHE_DIR: cacheDir,
-    },
-    "evolve app",
-  );
-  start("pnpm", port(BASELINE_PORT), { EVOLVE_PERF_BASELINE: "1" }, "baseline app");
+  const evolveEnv = { ...appEnv, EVOLVE_CLOUD_URL: cloud, EVOLVE_POLL_SECONDS: "60" };
+  if (HOST === "docker") {
+    const { EVOLVE_CACHE_DIR: _dir, ...env } = evolveEnv;
+    const image = args["docker-image"]!;
+    startContainer(image, EVOLVE_PORT, env);
+    startContainer(`${image}-baseline`, BASELINE_PORT, {});
+  } else {
+    const cacheDir = join(FIXTURE, ".evolve-cache/perf");
+    rmSync(cacheDir, { recursive: true, force: true });
+    mkdirSync(cacheDir, { recursive: true });
+    const port = (p: number) => ["exec", "next", "start", "--port", String(p)];
+    start("pnpm", port(EVOLVE_PORT), { ...evolveEnv, EVOLVE_CACHE_DIR: cacheDir }, "evolve app");
+    start("pnpm", port(BASELINE_PORT), { EVOLVE_PERF_BASELINE: "1" }, "baseline app");
+  }
 
   const withUrl = `http://localhost:${EVOLVE_PORT}`;
   const withoutUrl = `http://localhost:${BASELINE_PORT}`;
@@ -312,7 +376,9 @@ const load = args["skip-load"]
 
 const report = {
   at: new Date().toISOString(),
-  mode: remote ? "remote" : "local next start",
+  mode: remote ? "remote" : HOST === "docker" ? "local docker standalone" : "local next start",
+  budgetMs: BUDGET_MS,
+  proxyBudgetMs: PROXY_BUDGET_MS,
   node: process.version,
   requests: N,
   warmup: WARMUP,
@@ -337,13 +403,17 @@ if (load)
     `\nLoad, ${C} concurrent, ${N} requests on /: Evolve ${load.with.rps} req/s (TTFB p95 ${load.with.ttfb.p95.toFixed(2)} ms), baseline ${load.without.rps} req/s (p95 ${load.without.ttfb.p95.toFixed(2)} ms)`,
   );
 const errors = results.reduce((s, r) => s + r.errors, 0);
-if (errors) print(`errors (non-200): ${errors}`);
+const challenged = results.reduce((s, r) => s + r.challenged, 0);
+if (errors)
+  print(`errors (non-200, left out of the numbers): ${errors}, of which challenged: ${challenged}`);
 
-const over = results.filter((r) => r.addedP95 >= BUDGET_MS);
+const over = results.filter(
+  (r) => r.addedP95 >= BUDGET_MS || r.serverTiming.p95 >= PROXY_BUDGET_MS,
+);
 stopAll();
 if (over.length || errors) {
   console.error(
-    `over budget (${BUDGET_MS} ms added p95): ${over.map((r) => r.name).join(", ") || "none"}`,
+    `over budget (${BUDGET_MS} ms added p95, ${PROXY_BUDGET_MS} ms in-proxy p95): ${over.map((r) => r.name).join(", ") || "none"}`,
   );
   process.exit(1);
 }
