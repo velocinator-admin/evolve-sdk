@@ -1,0 +1,23 @@
+{
+  "pv": 1,
+  "id": "person-hero",
+  "jsonSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string"
+      },
+      "cta": {
+        "type": "string"
+      }
+    },
+    "required": ["title", "cta"]
+  },
+  "schemaHash": "4c1d9f0e2b7a65381c0d4e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b",
+  "controlProps": {
+    "title": "Work with a top agent",
+    "cta": "Get started"
+  },
+  "path": "/:name([A-Z][A-Za-z]*-[A-Za-z-]+)",
+  "vars": ["fullName", "name"]
+}

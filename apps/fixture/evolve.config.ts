@@ -9,6 +9,8 @@ export default defineConfig({
     "/slow": { mode: "dynamic" },
     // T21.1: pattern route (app/[evolve]/lp/[slug]).
     "/lp/:slug": { mode: "static" },
+    // T29.1 (TPL-1): person pages under a regex-constrained param (app/[evolve]/[name]).
+    "/:name([A-Z][A-Za-z]*-[A-Za-z-]+)": { mode: "static" },
   },
   // e2e runs poll fast so a publish shows up quickly.
   sync: { pollSeconds: Number(process.env.EVOLVE_POLL_SECONDS ?? 60) },

@@ -8,6 +8,7 @@ import {
   type AggregateRow,
   MAX_RESPONSE_ROWS,
   MAX_VITALS_ROWS,
+  PAGES_ERROR_GOAL,
   VITALS_BINS,
   VITALS_ERROR_GOAL,
   VITALS_METRICS,
@@ -155,6 +156,36 @@ export async function runAggregate(
         }
       }
     }
+    // Protocol 1.4.0 (TPL-1): distinct exposed pages per asked-for experiment
+    // ("pooled across N pages"). A count only; the paths stay here.
+    let pages: { exp: string; n: number }[] | undefined;
+    if (req.pages?.length) {
+      const known = new Set(req.experiments.map((e) => e.id));
+      const ids = [...new Set(req.pages)].filter((id) => known.has(id) && !remaining.includes(id));
+      const left = deadline - now();
+      if (ids.length && left < MIN_QUERY_MS) {
+        errors.push({ goal: PAGES_ERROR_GOAL, message: "out of time budget" });
+      } else if (ids.length) {
+        await conn.unsafe(
+          `set statement_timeout = ${Math.floor(Math.min(opts.statementTimeoutMs, left))}`,
+        );
+        try {
+          const out = await conn<{ exp: string; n: string }[]>`
+            select experiment_id as exp, count(distinct path)::text as n
+            from evolve.exposures
+            where experiment_id = any(${ids}::text[]) and first_at <= ${asOf}
+            group by 1`;
+          const by = new Map(out.map((r) => [r.exp, Number(r.n)]));
+          pages = ids.map((exp) => ({ exp, n: by.get(exp) ?? 0 }));
+        } catch (e) {
+          const code = (e as { code?: string }).code;
+          errors.push({
+            goal: PAGES_ERROR_GOAL,
+            message: code === QUERY_CANCELED ? "statement timeout" : errorMessage(e),
+          });
+        }
+      }
+    }
     await conn.unsafe("set statement_timeout = 0");
 
     const usage = req.usageFrom
@@ -179,6 +210,7 @@ export async function runAggregate(
       usage,
       errors,
       ...(vitals ? { vitals } : {}),
+      ...(pages ? { pages } : {}),
     };
     const body = JSON.stringify(response);
     await conn`

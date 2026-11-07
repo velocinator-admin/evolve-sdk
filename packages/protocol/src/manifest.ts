@@ -2,6 +2,7 @@ import { z } from "zod";
 import { canonicalJson, sha256Hex } from "./canonical";
 import { serializedGoalSchema } from "./goals";
 import { GOAL_KEY_RE, REGION_ID_RE } from "./ids";
+import { MAX_REGION_VARS, VAR_NAME_RE } from "./template";
 
 /** Size caps the cloud enforces on region registrations (bytes of canonical JSON). */
 export const MAX_REGION_SCHEMA_BYTES = 64 * 1024;
@@ -55,5 +56,11 @@ export const regionRegistrationSchema = z.looseObject({
     .record(z.string(), z.unknown())
     .refine((p) => bytes(p) <= MAX_REGION_CONTROL_BYTES, "controlProps too large"),
   path,
+  /**
+   * Protocol 1.4.0 (TPL-1.2): names of the `{var}` placeholders this region can
+   * fill on `path` (route params and `<Optimizable vars>` keys). Names only,
+   * never values. Absent = none (SDKs before 0.9).
+   */
+  vars: z.array(z.string().regex(VAR_NAME_RE)).max(MAX_REGION_VARS).optional(),
 });
 export type RegionRegistration = z.infer<typeof regionRegistrationSchema>;

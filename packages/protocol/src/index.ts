@@ -13,6 +13,7 @@ export * from "./pull";
 export * from "./routes";
 export * from "./rules";
 export * from "./sync";
+export * from "./template";
 export * from "./verify-bundle";
 export * from "./version";
 export * from "./vitals";

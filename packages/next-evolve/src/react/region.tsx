@@ -1,11 +1,21 @@
-import { type BundlePayload, CONTROL_CODE, type CodePair, decodeCode } from "@next-evolve/protocol";
+import {
+  type BundlePayload,
+  CONTROL_CODE,
+  type CodePair,
+  decodeCode,
+  fillPlaceholders,
+  hasPlaceholders,
+  MAX_REGION_VARS,
+  VAR_NAME_RE,
+} from "@next-evolve/protocol";
+import { routeParamNames } from "@next-evolve/protocol/routes";
 import { headers } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { after, connection } from "next/server";
 import { createElement, type ReactElement } from "react";
 import type { z } from "zod";
 import { registerRegion } from "../cloud/regions";
-import { HEADER_CODE, HEADER_PATH } from "../core/constants";
+import { HEADER_CODE, HEADER_PATH, HEADER_VARS } from "../core/constants";
 import { logRateLimited } from "../core/log";
 import { requestContext } from "./context";
 import { getOptimizableMeta, type OptimizableComponent } from "./optimizable";
@@ -21,6 +31,14 @@ export type OptimizableProps<P extends object, S extends z.ZodObject> = {
   component: OptimizableComponent<P, S>;
   /** Control props. Variant props are merged over these; schema defaults apply. */
   props: ControlProps<P, S>;
+  /**
+   * Per-page values for `{var}` placeholders in variant copy (TPL-1.2), e.g.
+   * CMS data: `vars={{ fullName: person.fullName }}`. Route params (`{name}`
+   * for `/:name`) are available without this. The names are registered with
+   * the cloud, never the values. A variant that uses a var this page doesn't
+   * have renders control, uncounted.
+   */
+  vars?: Readonly<Record<string, string | number | null | undefined>>;
 };
 
 let warnedNoContext = false;
@@ -51,6 +69,31 @@ async function currentPath(): Promise<string | null> {
   }
 }
 
+/** Route params for this render (static: withEvolve; dynamic: the proxy header). */
+async function routeVars(): Promise<Record<string, string>> {
+  const ctx = requestContext();
+  if (ctx.vars) return ctx.vars;
+  try {
+    const raw = (await headers()).get(HEADER_VARS);
+    if (!raw) return {};
+    const v = JSON.parse(decodeURIComponent(raw)) as unknown;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    return Object.fromEntries(
+      Object.entries(v).filter((e): e is [string, string] => typeof e[1] === "string"),
+    );
+  } catch (e) {
+    unstable_rethrow(e);
+    return {};
+  }
+}
+
+/** Var names a region offers on `path`: the route's params plus the `vars` prop's keys. */
+export function regionVarNames(path: string | null, vars: Record<string, unknown> | undefined) {
+  const names = new Set(path ? routeParamNames(path) : []);
+  for (const k of Object.keys(vars ?? {})) if (VAR_NAME_RE.test(k)) names.add(k);
+  return [...names].sort().slice(0, MAX_REGION_VARS);
+}
+
 /**
  * Region registration (spec §5.2): after the response, deduped per process,
  * errors swallowed. `after()` is called from a timer, not during render: with
@@ -64,6 +107,7 @@ export function scheduleRegistration(
   meta: { jsonSchema: Record<string, unknown>; schemaHash: string },
   controlProps: Record<string, unknown>,
   path: string | null,
+  vars: string[] = [],
 ): void {
   if (!path) return;
   const run = () =>
@@ -73,6 +117,8 @@ export function scheduleRegistration(
       schemaHash: meta.schemaHash,
       controlProps,
       path,
+      // Protocol 1.4.0: names only. Omitted when empty (same message as before).
+      ...(vars.length ? { vars } : {}),
     });
   setTimeout(() => {
     try {
@@ -99,6 +145,7 @@ export async function Optimizable<P extends object, S extends z.ZodObject>({
   id,
   component,
   props,
+  vars,
 }: OptimizableProps<P, S>): Promise<ReactElement> {
   const meta = getOptimizableMeta(component);
   if (!meta) {
@@ -122,11 +169,13 @@ export async function Optimizable<P extends object, S extends z.ZodObject>({
   const control = () => createElement(component, controlProps);
 
   const code = await currentCode();
+  const path = await currentPath();
   scheduleRegistration(
     id,
     meta,
     parsedControl.success ? (parsedControl.data as Record<string, unknown>) : editableOf(props),
-    await currentPath(),
+    path,
+    regionVarNames(path, vars),
   );
   if (!code) {
     if (!warnedNoContext && process.env.NODE_ENV !== "production") {
@@ -167,7 +216,28 @@ export async function Optimizable<P extends object, S extends z.ZodObject>({
 
   if (variant.ctrl || Object.keys(variant.props).length === 0) return marker(attrs, control());
 
-  const parsed = meta.schema.safeParse(editableOf({ ...props, ...variant.props }));
+  // `{var}` placeholders (TPL-1.2): route params, then the `vars` prop. A var
+  // this page doesn't have renders control, not counted.
+  let variantProps = variant.props;
+  if (hasPlaceholders(variantProps)) {
+    const values: Record<string, string> = { ...(await routeVars()) };
+    for (const [k, v] of Object.entries(vars ?? {})) {
+      if (typeof v === "string") values[k] = v;
+      else if (typeof v === "number" && Number.isFinite(v)) values[k] = String(v);
+      else delete values[k];
+    }
+    const filled = fillPlaceholders(variantProps, values);
+    if (!filled.ok) {
+      logRateLimited(
+        `var:${pair.var}:${filled.missing}`,
+        `variant ${pair.var} of region "${id}" uses {${filled.missing}}, which this page doesn't provide; serving control`,
+      );
+      return marker({ ...attrs, "data-evolve-x": "" }, control());
+    }
+    variantProps = filled.value;
+  }
+
+  const parsed = meta.schema.safeParse(editableOf({ ...props, ...variantProps }));
   if (!parsed.success) {
     logRateLimited(
       `variant:${pair.var}`,

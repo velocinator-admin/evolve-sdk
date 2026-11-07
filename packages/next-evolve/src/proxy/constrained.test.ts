@@ -68,6 +68,47 @@ describe("constrained route params (TPL-1.1)", () => {
   });
 });
 
+describe("dynamic mode passes the matched params for {var} placeholders (TPL-1.2)", () => {
+  const dyn = defineConfig({
+    routes: { [PERSON]: { mode: "dynamic" }, "/docs/:path*": { mode: "dynamic" } },
+  });
+  const st = storeWith((b) => {
+    b.routing.routes = { [PERSON]: ["k3j9x2"] };
+  });
+  const vars = (res: NextResponse | null) => {
+    const raw = res!.headers.get("x-middleware-request-x-evolve-vars");
+    return raw ? JSON.parse(decodeURIComponent(raw)) : raw;
+  };
+
+  it("decoded params; a visitor's own header is overwritten", () => {
+    const res = applyEvolve(
+      dyn,
+      request("/Christopher-G", { headers: { "x-evolve-vars": "forged" } }),
+      event,
+      { store: st, random: () => 0.9 },
+    );
+    expect(res!.headers.get("x-middleware-request-x-evolve-path")).toBe(PERSON);
+    expect(vars(res)).toEqual({ name: "Christopher-G" });
+    const docs = applyEvolve(
+      dyn,
+      request("/docs/zo%C3%AB/b", { headers: { "x-evolve-vars": "forged" } }),
+      event,
+      {
+        store: st,
+      },
+    );
+    expect(vars(docs)).toEqual({ path: "zoë/b" }); // decoded;
+    // Exact routes have no params: the header is emptied, not passed through.
+    const exact = applyEvolve(
+      defineConfig({ routes: { "/features": { mode: "dynamic" } } }),
+      request("/features", { headers: { "x-evolve-vars": "forged" } }),
+      event,
+      { store: st },
+    );
+    expect(exact!.headers.get("x-middleware-request-x-evolve-vars")).toBe("");
+  });
+});
+
 describe("Next's matcher takes a constrained key as written (evolveMatcher)", () => {
   it("runs the proxy for person pages, not /pricing-like pages", async () => {
     const { unstable_doesMiddlewareMatch: doesMatch } = await import(

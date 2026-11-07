@@ -10,7 +10,7 @@ import { cdnCookieName } from "../config/cdn";
 import { type EvolveConfig, normalizePath, resolveConfig } from "../config/config";
 import { assign, visitorDraw } from "../core/assign";
 import { createBotDetector } from "../core/bots";
-import { HEADER_CODE, HEADER_PATH } from "../core/constants";
+import { HEADER_CODE, HEADER_PATH, HEADER_VARS } from "../core/constants";
 import {
   ANON_COOKIE,
   ASSIGN_COOKIE,
@@ -20,7 +20,7 @@ import {
   serializeAssignments,
 } from "../core/cookies";
 import { logRateLimited } from "../core/log";
-import { bundleRoutes } from "../core/routes";
+import { bundleRoutes, paramVars, type RouteParams } from "../core/routes";
 import { RULE_COOKIE, requestFacts, resolveRules } from "../core/rules";
 import { onDemand } from "../store/on-demand";
 import { coldStart, getBundleStore, getSiteIdentity, type RuntimeOptions } from "../store/runtime";
@@ -125,7 +125,7 @@ export function applyEvolve(
     // views must keep going through the proxy.
     if (routed && !ruled && isStatic && cfg.cdnRouting && routeKey === path)
       setCookies.push([cdnCookieName(routeKey), code, false, cfg.cdnRouting.maxAgeSeconds]);
-    res = isStatic ? rewrite(req, code, path) : passThrough(req, code, routeKey);
+    res = isStatic ? rewrite(req, code, path) : passThrough(req, code, routeKey, hit.params);
     if (setCookies.length) {
       const secure =
         (req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", "")) === "https";
@@ -143,7 +143,9 @@ export function applyEvolve(
     }
   } catch (e) {
     logRateLimited("proxy", "proxy error; serving control", e);
-    res = isStatic ? rewrite(req, CONTROL_CODE, path) : passThrough(req, CONTROL_CODE, routeKey);
+    res = isStatic
+      ? rewrite(req, CONTROL_CODE, path)
+      : passThrough(req, CONTROL_CODE, routeKey, hit.params);
   }
   // Off Vercel, a shared CDN in front of the app could cache one visitor's
   // variant for everyone. Vercel's cache keys on the rewritten path.
@@ -168,10 +170,21 @@ function rewrite(req: NextRequest, code: string, path: string): NextResponse {
 }
 
 /** `routeKey` (the route as configured, e.g. `/lp/:slug`) is what regions register under. */
-function passThrough(req: NextRequest, code: string, routeKey: string): NextResponse {
+function passThrough(
+  req: NextRequest,
+  code: string,
+  routeKey: string,
+  params: RouteParams,
+): NextResponse {
   const headers = new Headers(req.headers);
   headers.set(HEADER_CODE, code);
   headers.set(HEADER_PATH, routeKey);
+  // Always overwritten, so a visitor can't supply their own placeholder values.
+  const vars = paramVars(params);
+  headers.set(
+    HEADER_VARS,
+    Object.keys(vars).length ? encodeURIComponent(JSON.stringify(vars)) : "",
+  );
   return NextResponse.next({ request: { headers } });
 }
 

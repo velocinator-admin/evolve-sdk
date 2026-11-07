@@ -1,4 +1,5 @@
 import { CODE_RE, CONTROL_CODE } from "@next-evolve/protocol";
+import { parseRouteKey } from "@next-evolve/protocol/routes";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { type ComponentType, createElement, type ReactElement } from "react";
@@ -33,6 +34,14 @@ export function withEvolve<P extends object>(
     const ctx = requestContext();
     ctx.code = code;
     ctx.path = path;
+    // Route params fill `{var}` placeholders in variant copy (TPL-1.2).
+    const { evolve: _code, ...params } = await props.params;
+    const vars: Record<string, string> = {};
+    for (const [k, v] of Object.entries(params)) {
+      if (typeof v === "string") vars[k] = v;
+      else if (Array.isArray(v)) vars[k] = v.join("/");
+    }
+    ctx.vars = vars;
     return createElement(Page, props);
   }
   Object.defineProperty(EvolvePage, "name", {
@@ -48,11 +57,16 @@ export function evolveStaticParams(): { evolve: string }[] {
 
 /** `/lp/:slug` + `{ slug: "a" }` → `/lp/a`; catch-alls join their segments. */
 function fillPattern(route: string, params: Record<string, string | string[] | undefined>): string {
-  const out = route.replace(/\/:([A-Za-z_][A-Za-z0-9_]*)([*+])?/g, (_m, name: string) => {
-    const v = params[name];
-    const segs = Array.isArray(v) ? v : v === undefined ? [] : [v];
-    return segs.map((x) => `/${encodeURIComponent(x)}`).join("");
-  });
+  const segs = parseRouteKey(route);
+  if (typeof segs === "string") return route;
+  const out = segs
+    .map((s) => {
+      if (s.kind === "literal") return `/${s.text}`;
+      const v = params[s.name];
+      const vals = Array.isArray(v) ? v : v === undefined ? [] : [v];
+      return vals.map((x) => `/${encodeURIComponent(x)}`).join("");
+    })
+    .join("");
   return out || "/";
 }
 

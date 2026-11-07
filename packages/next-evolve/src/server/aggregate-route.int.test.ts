@@ -450,3 +450,31 @@ describe("POST /api/evolve/aggregate: Core Web Vitals (protocol 1.1.0)", () => {
     expect(body.errors).toEqual([{ goal: "$vitals", message: "out of time budget" }]);
   });
 });
+
+describe("POST /api/evolve/aggregate: pages count (protocol 1.4.0, TPL-1)", () => {
+  beforeEach(async () => {
+    await sql`insert into evolve.exposures (experiment_id, anon_id, variant_id, first_at, path) values
+      ('k3j9x2', 'b1', 'a8f2l1', '2026-11-22T10:00:00Z', '/Christopher-G'),
+      ('k3j9x2', 'b2', 'c1d2e3', '2026-11-22T10:00:00Z', '/Christopher-G'),
+      ('k3j9x2', 'b3', 'c1d2e3', '2026-11-22T10:00:00Z', '/Mary-Ann'),
+      ('k3j9x2', 'b4', 'c1d2e3', '2026-12-05T10:00:00Z', '/After-AsOf')`;
+  });
+
+  it("not asked → no pages key", async () => {
+    const body = await ok(await handleAggregate(post(request()), deps()));
+    expect(body).not.toHaveProperty("pages");
+  });
+
+  it("asked → distinct exposed paths per experiment up to asOf (0 when none)", async () => {
+    const body = await ok(
+      await handleAggregate(post(request({ pages: ["k3j9x2", "p7q8r9", "zz9999"] })), deps()),
+    );
+    expect(body.errors).toEqual([]);
+    // "/", "/Christopher-G", "/Mary-Ann"; the exposure after asOf doesn't count; zz9999 isn't requested.
+    expect(body.pages).toEqual([
+      { exp: "k3j9x2", n: 3 },
+      { exp: "p7q8r9", n: 1 },
+    ]);
+    expect(JSON.stringify(body)).not.toContain("Christopher");
+  });
+});
