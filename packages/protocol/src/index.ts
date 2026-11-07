@@ -10,6 +10,7 @@ export * from "./keys";
 export * from "./manifest";
 export * from "./preview";
 export * from "./pull";
+export * from "./routes";
 export * from "./rules";
 export * from "./sync";
 export * from "./verify-bundle";

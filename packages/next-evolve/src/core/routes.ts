@@ -1,68 +1,38 @@
-// Route patterns (D77): `routes` keys in evolve.config.ts and in the bundle may
-// be Next-style patterns (`/lp/:slug`, `/docs/:path*`, `/docs/:path+`).
-// Compiled once; an exact path wins over a pattern, then the most specific
-// pattern (fewest params, then the longest static prefix).
+// Route patterns (D77, TPL-1.1): `routes` keys in evolve.config.ts and in the
+// bundle may be Next-style patterns (`/lp/:slug`, `/docs/:path*`,
+// `/docs/:path+`, and since 0.9 regex-constrained params like
+// `/:name([A-Z][A-Za-z]*-[A-Za-z-]+)`). The grammar, the safety check and the
+// linear-time matcher live in @next-evolve/protocol (shared with the cloud).
+// Compiled once per bundle; precedence: exact path → constrained pattern →
+// unconstrained pattern, then the most specific (fewest params, longest static
+// prefix, no catch-all).
+import {
+  type CompiledRoute,
+  compareRoutes,
+  compileRoute,
+  isRoutePattern,
+  parseRouteKey,
+  type RouteParams,
+} from "@next-evolve/protocol/routes";
 
-const PARAM = /^:([A-Za-z_][A-Za-z0-9_]*)([*+])?$/;
-const LITERAL = /^[^:[\]*?#()]+$/;
-
-export type RoutePattern = {
-  key: string;
-  re: RegExp;
-  params: number;
-  /** Characters before the first param (more = more specific). */
-  prefix: number;
-  /** Ends in a catch-all (`*` / `+`). */
-  rest: boolean;
-};
+export type { RouteParams };
 
 /** Whether a route key is a pattern (has a `:param` segment). */
-export const isPattern = (key: string): boolean => key.includes("/:");
+export const isPattern = isRoutePattern;
 
-/**
- * Compiles a pattern key, or explains why it isn't one. `:name` matches one
- * segment; `:name*` (zero or more) and `:name+` (one or more) only at the end.
- */
-export function compilePattern(key: string): RoutePattern | string {
-  const segs = key.split("/").slice(1);
-  let re = "^";
-  let params = 0;
-  let prefix = -1;
-  let rest = false;
-  for (let i = 0; i < segs.length; i++) {
-    const s = segs[i]!;
-    const m = PARAM.exec(s);
-    if (!m) {
-      if (!LITERAL.test(s)) return `segment "${s}" must be a literal or :param`;
-      re += `/${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
-      continue;
-    }
-    if (prefix < 0) prefix = segs.slice(0, i).reduce((n, x) => n + x.length + 1, 0);
-    params++;
-    if (m[2]) {
-      if (i !== segs.length - 1) return `:${m[1]}${m[2]} must be the last segment`;
-      rest = true;
-      re += m[2] === "*" ? "(?:/[^/]+)*" : "(?:/[^/]+)+";
-    } else re += "/[^/]+";
-  }
-  if (params === 0) return "not a pattern";
-  return { key, re: new RegExp(`${re}$`), params, prefix, rest };
+/** Compiles a pattern key, or explains why it isn't one. */
+export function compilePattern(key: string): CompiledRoute | string {
+  return compileRoute(key);
 }
 
-/** Most specific first: fewest params, then longest static prefix, then no catch-all, then key. */
-function bySpecificity(a: RoutePattern, b: RoutePattern): number {
-  return (
-    a.params - b.params ||
-    b.prefix - a.prefix ||
-    Number(a.rest) - Number(b.rest) ||
-    (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
-  );
-}
+export type RouteMatch<T> = { key: string; value: T; params: RouteParams };
 
 export type RouteTable<T> = {
-  /** The route key and value for a normalized path: exact first, then patterns. */
-  match(path: string): { key: string; value: T } | null;
+  /** The route key, value and raw params for a normalized path: exact first, then patterns. */
+  match(path: string): RouteMatch<T> | null;
 };
+
+const NO_PARAMS: RouteParams = Object.freeze({}) as RouteParams;
 
 /**
  * A lookup table over route keys. Patterns that don't compile are left out
@@ -71,21 +41,24 @@ export type RouteTable<T> = {
  */
 export function routeTable<T>(entries: Iterable<[string, T]>): RouteTable<T> {
   const exact = new Map<string, T>();
-  const patterns: (RoutePattern & { value: T })[] = [];
+  const patterns: (CompiledRoute & { value: T })[] = [];
   for (const [key, value] of entries) {
     if (!isPattern(key)) {
       exact.set(key, value);
       continue;
     }
-    const p = compilePattern(key);
-    if (typeof p !== "string") patterns.push({ ...p, value });
+    const p = compileRoute(key);
+    if (typeof p !== "string") patterns.push(Object.assign(p, { value }));
   }
-  patterns.sort(bySpecificity);
+  patterns.sort(compareRoutes);
   return {
     match(path) {
       const hit = exact.get(path);
-      if (hit !== undefined) return { key: path, value: hit };
-      for (const p of patterns) if (p.re.test(path)) return { key: p.key, value: p.value };
+      if (hit !== undefined) return { key: path, value: hit, params: NO_PARAMS };
+      for (const p of patterns) {
+        const params = p.match(path);
+        if (params) return { key: p.key, value: p.value, params };
+      }
       return null;
     },
   };
@@ -105,15 +78,36 @@ export function bundleRoutes(bundle: {
   return t;
 }
 
-/** App Router folder for a route key: `/lp/:slug` → `lp/[slug]`, `:p*` → `[[...p]]`, `:p+` → `[...p]`. */
+/**
+ * App Router folder for a route key: `/lp/:slug` → `lp/[slug]`, `:p*` →
+ * `[[...p]]`, `:p+` → `[...p]`, `:name(re)` → `[name]` (the proxy checks the constraint).
+ */
 export function routeDir(key: string): string {
-  return key
-    .split("/")
-    .slice(1)
-    .map((s) => {
-      const m = PARAM.exec(s);
-      if (!m) return s;
-      return m[2] === "*" ? `[[...${m[1]}]]` : m[2] === "+" ? `[...${m[1]}]` : `[${m[1]}]`;
-    })
+  const segs = isPattern(key) ? parseRouteKey(key) : null;
+  if (!segs || typeof segs === "string") return key.split("/").slice(1).join("/");
+  return segs
+    .map((s) =>
+      s.kind === "literal"
+        ? s.text
+        : s.rest === "*"
+          ? `[[...${s.name}]]`
+          : s.rest === "+"
+            ? `[...${s.name}]`
+            : `[${s.name}]`,
+    )
     .join("/");
+}
+
+/** Decoded string values for `{var}` placeholders (catch-alls joined with `/`). */
+export function paramVars(params: RouteParams): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(params)) {
+    const raw = Array.isArray(v) ? v.join("/") : v;
+    try {
+      out[k] = decodeURIComponent(raw);
+    } catch {
+      out[k] = raw;
+    }
+  }
+  return out;
 }

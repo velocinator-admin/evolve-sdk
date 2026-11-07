@@ -56,4 +56,39 @@ describe("route patterns (D77)", () => {
     expect(routeDir("/docs/:path*")).toBe("docs/[[...path]]");
     expect(routeDir("/shop/:rest+")).toBe("shop/[...rest]");
   });
+
+  it("routeDir maps a constrained param to a plain folder (the proxy checks the constraint)", () => {
+    expect(routeDir("/:name([A-Z][A-Za-z]*-[A-Za-z-]+)")).toBe("[name]");
+    expect(routeDir("/:name/:state/:city/:id(z[0-9]+)")).toBe("[name]/[state]/[city]/[id]");
+  });
+});
+
+describe("constrained params (TPL-1.1): exact → constrained → unconstrained → D77", () => {
+  const PERSON = "/:name([A-Z][A-Za-z]*-[A-Za-z-]+)";
+  const table = routeTable<string>(
+    [
+      "/pricing",
+      "/:any",
+      PERSON,
+      "/:name/:state/:city/:id(z[0-9]+)",
+      "/:a/:b/:c/:d",
+      "/lp/:slug",
+    ].map((k) => [k, k]),
+  );
+  const cases: [string, string | null][] = [
+    ["/pricing", "/pricing"],
+    ["/Christopher-G", PERSON],
+    ["/about", "/:any"],
+    ["/christopher-g", "/:any"],
+    ["/Christopher-Titus/Michigan/Marlette/z1581", "/:name/:state/:city/:id(z[0-9]+)"],
+    ["/Christopher-Titus/Michigan/Marlette/x1", "/:a/:b/:c/:d"],
+    ["/lp/x", "/lp/:slug"], // constrained 4-param pattern doesn't match a 2-segment path
+  ];
+  for (const [path, want] of cases) {
+    it(`${path} → ${want}`, () => expect(table.match(path)?.key ?? null).toBe(want));
+  }
+
+  it("returns raw params", () => {
+    expect(table.match("/Christopher-G")?.params).toEqual({ name: "Christopher-G" });
+  });
 });

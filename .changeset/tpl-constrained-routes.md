@@ -1,0 +1,6 @@
+---
+"next-evolve": minor
+"@next-evolve/protocol": minor
+---
+
+Regex-constrained route params (TPL-1.1, protocol 1.4.0). Route keys in `evolve.config.ts` and the bundle may constrain a single-segment param with a regex, Next matcher style: `/:name([A-Z][A-Za-z]*-[A-Za-z-]+)` serves `/Christopher-G` but not `/pricing`; `/:name/:state/:city/:id(z[0-9]+)`. The constraint matches the whole raw segment, is at most 200 characters, and is refused (at config load, and by the cloud) when it uses capturing groups, backreferences, lookarounds, anchors, nested quantifiers or `|` inside a repeated group. Matching runs on a linear-time NFA, compiled once per bundle; the proxy benchmark includes constrained routes. Precedence: exact path → constrained pattern → unconstrained pattern → D77 specificity. Static mode maps `/:name(…)` to `app/[evolve]/[name]`, `evolveMatcher` emits the key as-is (Next's matcher accepts it), and `evolveMetadata` fills it into the canonical URL. `@next-evolve/protocol` exports the grammar, validator and matcher (`parseRouteKey`, `routeKeyError`, `constraintError`, `compileRoute`, `compareRoutes`, `exampleRoutePaths`; also as the Node-free subpath `@next-evolve/protocol/routes`) for the cloud. next-evolve 0.8 drops a constrained bundle key (it never matches, so those pages serve control), which a test against the released 0.8.0 package pins.

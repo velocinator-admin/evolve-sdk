@@ -303,14 +303,25 @@ describe("createEvolveProxy", () => {
     expect(() => createEvolveProxy({ routes: { "/ev_x": { mode: "static" } } })).toThrow(/ev_/);
   });
 
-  it("in-proxy p95 < 1 ms", () => {
-    const proxy = createEvolveProxy(config, { store: storeWith() });
+  it("in-proxy p95 < 1 ms (exact and constrained routes, TPL-1.1)", () => {
+    const person = "/:name([A-Z][A-Za-z]*-[A-Za-z-]+)";
+    const withPatterns = defineConfig({
+      routes: { ...config.routes, [person]: { mode: "static" }, "/lp/:slug": { mode: "static" } },
+    });
+    const store = storeWith((b) => {
+      b.routing.routes[person] = ["k3j9x2"];
+    });
+    const proxy = createEvolveProxy(withPatterns, { store });
     const reqs = Array.from({ length: 50 }, (_, i) =>
-      i % 2
+      i % 4 === 1
         ? request("/")
-        : request("/pricing", {
-            cookies: { evolve_id: "a".repeat(22), evolve_a: "k3j9x2:a8f2l1" },
-          }),
+        : i % 4 === 2
+          ? request("/Christopher-G")
+          : i % 4 === 3
+            ? request(`/${"A".repeat(2000)}`)
+            : request("/pricing", {
+                cookies: { evolve_id: "a".repeat(22), evolve_a: "k3j9x2:a8f2l1" },
+              }),
     );
     for (const r of reqs) proxy(r, event as never);
     const times: number[] = [];
