@@ -2,8 +2,8 @@
 
 The open-source SDK for [Evolve](https://evolveab.com): A/B tests and bandits for Next.js App Router, rendered on the server with no flicker. Visitor-level data stays in your own Postgres; Evolve Cloud only sees aggregate counts. AI-written variants, autopilot and winner pull requests run in Evolve Cloud.
 
-- Docs and quickstart: [evolveab.com/docs](https://evolveab.com/docs)
-- Start a free 30-day trial: [app.evolveab.com](https://app.evolveab.com)
+- Docs and quickstart: [evolveab.com/docs](https://evolveab.com/docs?utm_source=github&utm_medium=directory)
+- Start a free 30-day trial: [app.evolveab.com](https://app.evolveab.com/sign-in?trial=1&utm_source=github&utm_medium=directory)
 - npm: [`next-evolve`](https://www.npmjs.com/package/next-evolve), [`@next-evolve/protocol`](https://www.npmjs.com/package/@next-evolve/protocol)
 
 The SDK needs an Evolve Cloud account: without a valid signed config bundle, every visitor gets the control version. The code is MIT so you can read and security-review what runs on your servers.
