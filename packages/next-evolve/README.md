@@ -1,8 +1,26 @@
 # next-evolve
 
-A/B tests and bandits for Next.js App Router sites. Variants are chosen on the server, so there is no flicker. Raw events stay in your own Postgres; Evolve Cloud only receives aggregate counts and does the statistics.
+A/B testing for the Next.js App Router that writes its own variants, runs them with no flicker, keeps visitor data in your Postgres, and ships winners as pull requests.
 
-> Alpha. Needs an Evolve Cloud account (sign-up is invite-only for now). Without one the SDK serves your normal pages and records nothing; see [docs/without-an-account.md](docs/without-an-account.md).
+```sh
+npx next-evolve init
+```
+
+Needs an [Evolve Cloud](https://evolveab.com/?utm_source=npm&utm_medium=directory) account: [start a 30-day free trial](https://app.evolveab.com/sign-in?trial=1&utm_source=npm&utm_medium=directory), no card needed. Without an account the SDK serves your normal pages and records nothing; see [docs/without-an-account.md](docs/without-an-account.md).
+
+## How it works
+
+- **No flicker.** Your Next.js proxy picks the variant from a locally cached, signed config, with no network call, and the page is rendered on the server. No anti-flicker snippet, no client-side swap.
+- **Your data stays on your servers.** Exposures, goal events and identities go into your own Postgres. Evolve Cloud never connects to it; it asks your app for signed aggregate counts.
+- **The cloud does the thinking.** Bayesian results, Thompson-sampling bandits, guardrail goals and auto-rollback, including Core Web Vitals.
+- **AI writes the next challenger.** Generated variants pass a schema check, locked props, forbidden claims and an LLM judge, then wait in an approval queue (or run on autopilot), capped at 20% of traffic.
+- **Winners come back as pull requests.** "Promote winner" opens a PR through the Evolve GitHub App, and the experiment archives itself once it merges (Growth plan and the trial).
+
+## What leaves your server
+
+Aggregates only: per experiment × variant × goal × day, counts and sums. Plus your config: routes, goal definitions, each region's prop schema and control props, and version numbers. Never sent: visitor ids, your user ids, IP addresses, user agents, event props, page-view paths, individual events or timestamps. The full list of every call, in both directions: [docs/what-leaves-your-server.md](docs/what-leaves-your-server.md).
+
+Docs: [evolveab.com/docs](https://evolveab.com/docs?utm_source=npm&utm_medium=directory)
 
 **Requirements:** Next.js 15.5 or newer with the App Router, Node 22.12 or newer, a Postgres 14+ database, and a host that runs a Node server (not `output: "export"`).
 
