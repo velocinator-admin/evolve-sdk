@@ -80,12 +80,12 @@ All are `HttpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` over https. None is s
 
 ## CDN routing (`cdnRouting`)
 
-On Vercel, running any proxy costs about 18–23 ms of TTFB per request, even one that does nothing: it's the platform invoking a function before the cache lookup, not Evolve's code (0.1–0.5 ms). `cdnRouting` lets repeat views skip the proxy:
+On Vercel, any proxy costs about 18–23 ms of TTFB per request, even one that does nothing. That time is the platform invoking a function before the cache lookup; Evolve's own code takes 0.1–0.5 ms. `cdnRouting` lets repeat views skip the proxy:
 
 1. The first view runs the proxy as usual. It also sets `evolve_r_<hash>` (one per route) to the variant code it served, for `maxAgeSeconds`.
 2. While that cookie lives, a `next.config` rewrite sends the request straight to the cached variant page, and the proxy matcher skips it. Measured on Vercel: repeat views at the no-proxy TTFB (+0 ms), first views about +20 ms (unchanged).
 
-**The trade-off: staleness.** A returning visitor who has the cookie keeps getting the variant they were routed to until it expires, even if the experiment was paused, completed or rolled back in the meantime. That's bounded by `maxAgeSeconds`. The default (the poll interval, 60 s in production) keeps the same bound polling already gives: "a change reaches every instance within one poll interval". A larger value saves more proxy invocations and makes pauses and auto-rollbacks slower to reach returning visitors. Sticky assignment doesn't depend on it: it lives in `evolve_a`, so the visitor keeps their arm when the proxy runs again.
+The trade-off is staleness. A returning visitor who has the cookie keeps getting the variant they were routed to until it expires, even if the experiment was paused, completed or rolled back in the meantime, for at most `maxAgeSeconds`. The default (the poll interval, 60 s in production) keeps the same bound polling already gives: "a change reaches every instance within one poll interval". A larger value saves more proxy invocations, but pauses and auto-rollbacks take longer to reach returning visitors. Sticky assignment doesn't depend on it; it lives in `evolve_a`, so the visitor keeps their arm when the proxy runs again.
 
 Set it up with `npx next-evolve init --cdn-routing` (it writes all three pieces), or by hand:
 
@@ -110,7 +110,7 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 ```
 
-`proxy.ts` needs `config.matcher` to be the literal `evolveMatcher(evolveConfig)` returns (Next only accepts a literal there). `init --cdn-routing` writes it, and `npx next-evolve doctor` prints it whenever the one in `proxy.ts` differs. It keeps the plain entries for dynamic routes and `/(ev_.*)`, and for each static route adds three: run the proxy unless the route cookie holds a well-formed code, and always for previews (`evolve_pv` cookie or `?evolve_preview`). **Re-run `init --cdn-routing` (or update the literal) when you add a route**; `npx next-evolve doctor` fails when the literal and `evolve.config` disagree, or when `next.config` doesn't call `evolveRewrites()`.
+`proxy.ts` needs `config.matcher` to be the literal `evolveMatcher(evolveConfig)` returns (Next only accepts a literal there). `init --cdn-routing` writes it, and `npx next-evolve doctor` prints it whenever the one in `proxy.ts` differs. It keeps the plain entries for dynamic routes and `/(ev_.*)`, and for each static route adds three: run the proxy unless the route cookie holds a well-formed code, and always for previews (`evolve_pv` cookie or `?evolve_preview`). Re-run `init --cdn-routing` (or update the literal) when you add a route; `npx next-evolve doctor` fails when the literal and `evolve.config` disagree, or when `next.config` doesn't call `evolveRewrites()`.
 
 What stays the same:
 - Off by default. Without `cdnRouting`, `evolveRewrites()` returns `[]`, `evolveMatcher()` is the plain list, and the proxy is unchanged.
@@ -124,11 +124,11 @@ What stays the same:
 
 ## Database
 
-`next-evolve migrate` creates a schema named `evolve` with these tables: `exposures` (one row per visitor per experiment), `events`, `identities`, `usage_daily` (tested page views per day), `vitals_daily` (Core Web Vitals histograms: counts per experiment, variant, metric, day and bin, no visitor id; since 0.5), `aggregate_runs` (the last 24 h of aggregate responses, for retries), `experiment_activity` and `cleanup_runs` (for `retentionDays`; since 0.7) and `migrations`. Your own tables aren't touched. Rows are kept until you delete them, or until `retentionDays` does.
+`next-evolve migrate` creates a schema named `evolve` with these tables: `exposures` (one row per visitor per experiment), `events`, `identities`, `usage_daily` (tested page views per day), `vitals_daily` (Core Web Vitals histograms: counts per experiment, variant, metric, day and bin, no visitor id; since 0.5), `aggregate_runs` (the last 24 h of aggregate responses, for retries), `experiment_activity` and `cleanup_runs` (for `retentionDays`; since 0.7) and `migrations`. It doesn't touch your own tables. Rows stay until you delete them, or until `retentionDays` does.
 
 ### Retention (`retentionDays`)
 
-With `retentionDays: 180` (minimum 30) the SDK deletes old rows once a day. There's no cron to set up: the cleanup runs inside the cloud's aggregate requests (push or pull mode), after the aggregation and within its time budget (at most 10 s per request). Deletes go in batches of 5,000 rows with a 5 s statement timeout, so they never lock `evolve.events`; a day's cleanup that runs out of time is finished by the next request.
+With `retentionDays: 180` (minimum 30) the SDK deletes old rows once a day. There's no cron to set up: the cleanup runs inside the cloud's aggregate requests (push or pull mode), after the aggregation and within its time budget (at most 10 s per request). Deletes go in batches of 5,000 rows with a 5 s statement timeout, so they never lock `evolve.events`; the next request finishes a day's cleanup that runs out of time.
 
 What's deleted:
 
@@ -136,4 +136,4 @@ What's deleted:
 - `exposures` older than `retentionDays` of experiments the cloud no longer aggregates (stopped or archived);
 - `vitals_daily` days older than the cutoff.
 
-The cutoff is `retentionDays` ago, **or earlier if a running or paused experiment needs it**: everything from one day before the earliest exposure of any experiment the cloud still asks about is kept, because its daily full recount re-reads from its start (goal windows and the 7-day guardrail windows included). Exposures of running and paused experiments, `identities` and `usage_daily` are never deleted. The SDK learns which experiments are active from the aggregate requests themselves (`evolve.experiment_activity`), and deletes nothing until it has tracked them for 26 hours (one daily full recount). Needs `npx next-evolve migrate` (0003); without it the cleanup is skipped with a warning. `evolve.cleanup_runs` records what each day deleted.
+The cutoff is `retentionDays` ago, **or earlier if a running or paused experiment needs it**: everything from one day before the earliest exposure of any experiment the cloud still asks about is kept, because its daily full recount re-reads from its start (goal windows and the 7-day guardrail windows included). Exposures of running and paused experiments, `identities` and `usage_daily` are never deleted. The SDK learns which experiments are active from the aggregate requests themselves (`evolve.experiment_activity`), and deletes nothing until it has tracked them for 26 hours (one daily full recount). It needs `npx next-evolve migrate` (0003); without it the SDK skips the cleanup and logs a warning. `evolve.cleanup_runs` records what each day deleted.

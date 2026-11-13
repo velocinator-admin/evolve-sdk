@@ -24,7 +24,7 @@ function optimizable<P, S extends z.ZodObject>(
 
 Marks a component as optimizable. `schema` is a Zod 4 object listing the props Evolve may change. Every schema key must be a prop the component accepts, with a compatible type, or it fails to compile. Constraints (`min`, `max`, `enum`, `url()`…) become the dashboard's form validation. `.meta({ label: "Headline" })` labels a field. Returns a thin wrapper; your component isn't modified.
 
-**Locking a prop.** `.meta({ locked: true })` keeps a field at the value in your code: the dashboard refuses to change it ("locked in code"), and AI suggestions never see or change it (it is left out of the schema the model gets, and every proposal is checked again after merging). Use it for legal copy, prices, product names or anything you don't want tested:
+To lock a prop, use `.meta({ locked: true })`. It keeps a field at the value in your code: the dashboard refuses to change it ("locked in code"), and AI suggestions never see or change it (it's left out of the schema the model gets, and the cloud checks every proposal again after merging). Use it for legal copy, prices, product names or anything you don't want tested:
 
 ```ts
 const heroSchema = z.object({
@@ -35,7 +35,7 @@ const heroSchema = z.object({
 
 The AI also never writes links or images: `url()` fields and string fields named like links (`href`, `url`, `src`, `link`, `path`, `image`, `img`, `to`, or ending in `Href`, `Url`, `Src`, `Link`, `Path`, `Image`…) are left out of its schema, and a proposal whose copy contains a link, an e-mail address or a domain is rejected (unless control's copy already shows it). If a region has nothing left to edit, "Suggest variants" is disabled with the reason.
 
-**Render props as text.** Variant props (written by people or the AI) arrive as plain strings and React escapes them when you render them as children or attributes. Don't pass an optimizable prop into `dangerouslySetInnerHTML` (or any other raw-HTML sink such as `innerHTML` in an effect): that would turn a variant's copy into markup on your page.
+Render optimizable props as text. Variant props (written by people or the AI) arrive as plain strings and React escapes them when you render them as children or attributes. Don't pass an optimizable prop into `dangerouslySetInnerHTML` (or any other raw-HTML sink such as `innerHTML` in an effect): that would turn a variant's copy into markup on your page.
 
 ### `<Optimizable id component props />`
 
@@ -50,21 +50,21 @@ The AI also never writes links or images: `url()` fields and string fields named
 | `props`     | Control props. Fields with schema defaults are optional; non-schema props pass through to every variant                                                                                           |
 | `vars`      | Optional (0.9+). Per-page values for `{var}` placeholders in variant copy, e.g. CMS data: `vars={{ fullName: person.fullName }}`. Route params (`{name}` on `/:name(…)`) are available without it |
 
-A server component (async). It renders the variant the proxy chose, or control. It never throws because of Evolve: a missing bundle, an unknown variant or props that fail the schema all render control. In development it warns once when it renders without Evolve context (the page isn't under `app/[evolve]/` and the route isn't a dynamic-mode route in `evolve.config.ts`).
+`<Optimizable>` is an async server component. It renders the variant the proxy chose, or control. It never throws because of Evolve: a missing bundle, an unknown variant or props that fail the schema all render control. In development it warns once when it renders without Evolve context (the page isn't under `app/[evolve]/` and the route isn't a dynamic-mode route in `evolve.config.ts`).
 
 On a page's first render in a process it registers the region (id, JSON Schema of the props, control props, path, and since 0.9 the names of the vars it offers: route params plus `vars` keys) with the cloud, in the background. Var values never leave your server.
 
-**Templated pages (0.9+).** Variant string props may contain `{var}` placeholders, filled per page: `"Hire {name} today"` on `/:name([A-Z][A-Za-z]*-[A-Za-z-]+)` renders "Hire Christopher-G today" on `/Christopher-G`. A variant that uses a var the page doesn't provide (or a value over 500 characters) renders control for that view, marked not counted. Values are inserted as text (React escapes them), and the result must still pass the schema.
+Templated pages (0.9+): variant string props may contain `{var}` placeholders, filled per page: `"Hire {name} today"` on `/:name([A-Z][A-Za-z]*-[A-Za-z-]+)` renders "Hire Christopher-G today" on `/Christopher-G`. A variant that uses a var the page doesn't provide (or a value over 500 characters) renders control for that view, marked not counted. Values are inserted as text (React escapes them), and the result must still pass the schema.
 
 With `cacheComponents: true` on a dynamic-mode page, wrap it in `<Suspense>` (a static `"use cache"` page needs no boundary).
 
 ### `withEvolve(Page, { path })`
 
-Wraps a static-mode page under `app/[evolve]/<route>/page.tsx`. Reads the variant code from the `[evolve]` segment (a malformed code is a 404) and makes it available to every `<Optimizable>` on the page. `path` is the public path (`"/"`, `"/pricing"`). `init` writes this for you.
+Wraps a static-mode page under `app/[evolve]/<route>/page.tsx`. It reads the variant code from the `[evolve]` segment (a malformed code returns 404) and makes it available to every `<Optimizable>` on the page. `path` is the public path (`"/"`, `"/pricing"`). `init` writes this for you.
 
 ### `evolveStaticParams()`
 
-`generateStaticParams` for static-mode pages. Prerenders control only (`ev_0`), so builds need no network. Variants render on first request and are then cached.
+`generateStaticParams` for static-mode pages. Prerenders control only (`ev_0`), so builds need no network. Each variant renders on its first request and is cached after that.
 
 ### `evolveMetadata(path, base?)`
 
@@ -150,7 +150,7 @@ Links the visitor (the `evolve_id` cookie, or `anonId`) to your user id, so even
 
 ### `<EvolveScript />`
 
-Put it once in the root layout's `<body>`. About 1.6 KB gzipped, no dependencies, not needed to show a variant. On every route it sends a page view and one exposure per counted region; on clicks (forms: on submit) of elements with `data-evolve-goal="<event>"` it sends that event. It batches every 2 seconds and on page hide, to `/api/evolve/collect` on your own origin. It does nothing under automation (`navigator.webdriver`).
+Put it once in the root layout's `<body>`. It's about 1.6 KB gzipped with no dependencies, and variants show without it. On every route it sends a page view and one exposure per counted region; on clicks (forms: on submit) of elements with `data-evolve-goal="<event>"` it sends that event. It batches every 2 seconds and on page hide, to `/api/evolve/collect` on your own origin. It does nothing under automation (`navigator.webdriver`).
 
 ### `track(name, props?)` and `identify(userId)`
 
@@ -256,4 +256,4 @@ All served by `createEvolveHandler` under `/api/evolve/`.
 }
 ```
 
-At most 500 events per call. `name` is required; every other field is optional (as in `evolve.track`). The default `source` is `"webhook"`. The events are written before the response, so a sender that retries on failure won't lose any.
+At most 500 events per call. `name` is required; every other field is optional (as in `evolve.track`). The default `source` is `"webhook"`. The route writes the events before it responds, so a sender that retries on failure won't lose any.

@@ -10,15 +10,15 @@ Needs an [Evolve Cloud](https://evolveab.com/?utm_source=npm&utm_medium=director
 
 ## How it works
 
-- **No flicker.** Your Next.js proxy picks the variant from a locally cached, signed config, with no network call, and the page is rendered on the server. No anti-flicker snippet, no client-side swap.
+- **No flicker.** Your Next.js proxy picks the variant from a locally cached, signed config, with no network call, and the server renders the page. You don't need an anti-flicker snippet, and nothing swaps in the browser.
 - **Your data stays on your servers.** Exposures, goal events and identities go into your own Postgres. Evolve Cloud never connects to it; it asks your app for signed aggregate counts.
-- **The cloud does the thinking.** Bayesian results, Thompson-sampling bandits, guardrail goals and auto-rollback, including Core Web Vitals.
+- **The cloud runs the stats.** It computes Bayesian results, runs Thompson-sampling bandits and watches guardrail goals, with auto-rollback that includes Core Web Vitals.
 - **AI writes the next challenger.** Generated variants pass a schema check, locked props, forbidden claims and an LLM judge, then wait in an approval queue (or run on autopilot), capped at 20% of traffic.
 - **Winners come back as pull requests.** "Promote winner" opens a PR through the Evolve GitHub App, and the experiment archives itself once it merges (Growth plan and the trial).
 
 ## What leaves your server
 
-Aggregates only: per experiment × variant × goal × day, counts and sums. Plus your config: routes, goal definitions, each region's prop schema and control props, and version numbers. Never sent: visitor ids, your user ids, IP addresses, user agents, event props, page-view paths, individual events or timestamps. The full list of every call, in both directions: [docs/what-leaves-your-server.md](docs/what-leaves-your-server.md).
+Only aggregates (counts and sums per experiment × variant × goal × day) and your config: routes, goal definitions, each region's prop schema and control props, and version numbers. Never sent: visitor ids, your user ids, IP addresses, user agents, event props, page-view paths, individual events or timestamps. [docs/what-leaves-your-server.md](docs/what-leaves-your-server.md) lists every call, in both directions.
 
 Docs: [evolveab.com/docs](https://evolveab.com/docs?utm_source=npm&utm_medium=directory)
 
@@ -26,11 +26,11 @@ Docs: [evolveab.com/docs](https://evolveab.com/docs?utm_source=npm&utm_medium=di
 
 ## Quickstart (about 15 minutes)
 
-This gets you from an existing Next.js app to a running experiment in local development. A timed run on a fresh `create-next-app` reached a variant served, an exposure recorded and the visitor in the dashboard in under 6 minutes.
+This takes an existing Next.js app to a running experiment in local development. A timed run on a fresh `create-next-app` reached a variant served, an exposure recorded and the visitor in the dashboard in under 6 minutes.
 
 ### 1. Create a site
 
-Sign in at [app.evolveab.com](https://app.evolveab.com), enter a site name and click **Create site**. Copy the **secret key** (`evk_live_…`) and the **webhook secret** (`whsec_…`). They are shown only once. If you lose them, issue a new key on the site's **Connect** page.
+Sign in at [app.evolveab.com](https://app.evolveab.com), enter a site name and click **Create site**. Copy the **secret key** (`evk_live_…`) and the **webhook secret** (`whsec_…`). The dashboard shows them only once; if you lose them, issue a new key on the site's **Connect** page.
 
 ### 2. Get a Postgres database
 
@@ -79,7 +79,7 @@ If you already have a `proxy.ts`/`middleware.ts`, or `init` can't edit your layo
 
 **Let `wrap` do it:** `npx next-evolve wrap /pricing` finds the components the page renders, generates the Zod schema from their TypeScript props and rewrites the usage, showing the diff first and restoring every file if `tsc` fails. See [docs/wrap.md](docs/wrap.md).
 
-Or by hand: declare which props Evolve may change with a Zod schema, next to the component:
+To do it by hand, declare which props Evolve may change with a Zod schema next to the component:
 
 ```tsx
 // components/hero.tsx

@@ -62,9 +62,9 @@ export default function Home() {
 }
 ```
 
-Your component file isn't touched. The schema lives in a separate `.evolve.ts` file because `next-evolve` is server-only: putting `optimizable()` inside `hero.tsx` would break any client component that imports `Hero`, and it can't work at all in a `"use client"` file. A component declared in the page file itself gets its schema in the page.
+`wrap` doesn't touch your component file. The schema lives in a separate `.evolve.ts` file because `next-evolve` is server-only: putting `optimizable()` inside `hero.tsx` would break any client component that imports `Hero`, and it can't work at all in a `"use client"` file. A component declared in the page file itself gets its schema in the page.
 
-After writing, `wrap` runs `tsc --noEmit` (with `--build`, also `next build`). If the check fails, **every file is restored byte for byte** and nothing is left half-done. Errors that tsc reports only in files `wrap` didn't change were there before, so they're reported but don't undo the wrap.
+After writing, `wrap` runs `tsc --noEmit` (with `--build`, also `next build`). If the check fails, `wrap` restores every file byte for byte, so nothing is left half-done. Errors tsc reports only in files `wrap` didn't change were already there; `wrap` reports them but keeps its changes.
 
 ## Which props become editable
 

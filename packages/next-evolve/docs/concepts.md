@@ -10,9 +10,9 @@
   - **Bandit:** Evolve Cloud shifts traffic toward the better arm as data arrives (recomputed at most hourly, on the primary goal).
 - **Goal:** what counts as success, defined in `evolve.goals.ts` (an event or a page view, a window, optional value). See [goals-and-attribution.md](goals-and-attribution.md).
 - **Exposure:** the first time a visitor sees an experiment. The beacon reports it; one row per visitor per experiment in your database.
-- **Core Web Vitals (0.5+):** the beacon also measures LCP, CLS and INP once per page load. They are stored as daily histograms per experiment and variant (no visitor id), so the cloud can compare each variant's page speed with control. INP is approximated as the slowest interaction on the page, which is enough to compare arms on the same page. With auto-rollback on (the default for new experiments), the cloud pauses a variant whose p75 over the last 7 days is clearly worse than control's: LCP more than 20% slower, CLS more than 0.05 higher or INP more than 50 ms slower, once both arms have at least 200 page views and the difference is near certain (P ≥ 0.999). Its visitors then get control.
+- **Core Web Vitals (0.5+):** the beacon also measures LCP, CLS and INP once per page load. Your app stores them as daily histograms per experiment and variant (no visitor id), so the cloud can compare each variant's page speed with control. The beacon takes the slowest interaction on the page as INP, which is close enough to compare arms on the same page. With auto-rollback on (the default for new experiments), the cloud pauses a variant whose p75 over the last 7 days is clearly worse than control's: LCP more than 20% slower, CLS more than 0.05 higher or INP more than 50 ms slower, once both arms have at least 200 page views and the difference is near certain (P ≥ 0.999). Its visitors then get control.
 
-Limits enforced by the cloud: at most 3 running experiments per path and one live experiment per region.
+The cloud allows at most 3 running experiments per path and one live experiment per region.
 
 ## How a request is served
 
@@ -26,7 +26,7 @@ Limits enforced by the cloud: at most 3 running experiments per path and one liv
 
 The bundle is your site's serving configuration: which experiments run on which paths, their traffic share and weights, and each variant's props. It contains no results, priors, goal logic or plan rules.
 
-- It's signed by Evolve Cloud (Ed25519). The SDK ships the public key and rejects anything that doesn't verify, belongs to another site, or is older than the one it has.
+- Evolve Cloud signs it (Ed25519). The SDK ships the public key and rejects anything that doesn't verify, belongs to another site, or is older than the one it has.
 - It expires 14 days after it was signed. The cloud re-signs every active site's bundle daily. If your app can't reach the cloud, it keeps serving the last bundle until it expires, then serves control.
 - Sources, freshest first: memory, then (Vercel + Global Config) the store, then (long-running Node) a disk cache, then the build-time copy `next-evolve pull` writes to `.evolve/bundle.generated.ts` during `prebuild`.
 
@@ -82,16 +82,16 @@ Direct requests to `/ev_…` paths return 404; they exist only as rewrite target
 - **No bundle** (new site with nothing started, or an expired bundle): control and no cookies.
 - **Preview links** from the dashboard force a variant for one browser session and record nothing.
 - **UTM rules** (since 0.8) override the assignment for a session: see [UTM rules](#utm-rules).
-- Paused experiments are removed from the bundle; their visitors see control. Completed experiments serve the winner to everyone, uncounted, until you ship it in code and archive the experiment.
+- Pausing an experiment removes it from the bundle, and its visitors see control. Completed experiments serve the winner to everyone, uncounted, until you ship it in code and archive the experiment.
 
 ## UTM rules
 
-A rule in the dashboard says "visitors matching these conditions see variant V of this experiment", for example `utm_campaign = spring-sale → "Spring"`. Rules travel in the bundle (`rules`, protocol 1.3.0) and the proxy evaluates them with no network call, before the normal assignment:
+A rule in the dashboard says "visitors matching these conditions see variant V of this experiment", for example `utm_campaign = spring-sale → "Spring"`. Rules travel in the bundle (`rules`, protocol 1.3.0), and the proxy evaluates them before the normal assignment, with no network call:
 
 - **Conditions** (all must hold): `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content` (from the query string), `ref` (the referrer's host, without `www.`), `country` (from `geoHeader`) and `device` (`mobile`, `tablet` or `desktop`, from the user agent). Operators: equals, one of, starts with (all three ignore case) and regular expression (as written). An experiment has up to 20 rules; the first that matches wins.
 - **Session:** a match sets the session cookie `evolve_r`, so the visitor keeps the rule's variant on later pages without the UTM until the browser session ends. The rule doesn't change `evolve_a`: afterwards the visitor is back on their normal arm.
 - **Counting:** a rule visitor's exposure is stored with `segment` = the rule id. The cloud reports each rule's results separately; main results, the bandit and guardrails use the `main` segment only. A visitor who was already counted in the main experiment stays there (first exposure wins).
-- Bots and visitors without consent get control, as always; a preview link wins over rules. A rule the SDK can't evaluate (for example an invalid regular expression) is skipped. Older SDKs ignore rules and serve the normal assignment.
+- Bots and visitors without consent get control, as always; a preview link wins over rules. The SDK skips a rule it can't evaluate (for example an invalid regular expression). Older SDKs ignore rules and serve the normal assignment.
 - With `cdnRouting`, a rule render sets no CDN route cookie, so the session's later views keep going through the proxy. A visitor who already holds a fresh route cookie (at most `maxAgeSeconds`) is served from the CDN until it expires, without evaluating rules.
 
 ## Where things run

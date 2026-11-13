@@ -86,6 +86,6 @@ Restart the app (or run `npx next-evolve push`) so the cloud sees the new goal, 
 ## Notes
 
 - Use `unit: "user"` if people often sign up on one device and pay on another.
-- Payments are attributed to the variant the visitor first saw, if they happen within 30 days of that first exposure.
+- Evolve credits a payment to the variant the visitor first saw, if it happens within 30 days of that first exposure.
 - Nothing about the payment leaves your server except the aggregate counts and sums per variant.
 - Using Segment or another service instead? Send the same event to `POST /api/evolve/track` ([API](api.md#http-routes)).

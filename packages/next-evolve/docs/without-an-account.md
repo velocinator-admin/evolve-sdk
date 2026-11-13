@@ -6,9 +6,9 @@
 
 If `EVOLVE_SECRET_KEY` isn't set, the key is invalid, or the site has never started an experiment:
 
-- Every page renders **control**: the props in your code.
-- **No cookies** are set.
-- **Nothing is recorded** (no assignments means no exposures; the collect route drops visitors without an `evolve_id` cookie).
+- Every page renders control: the props in your code.
+- The SDK sets no cookies.
+- Nothing is recorded (no assignments means no exposures; the collect route drops visitors without an `evolve_id` cookie).
 - There's no network call on the request path. In the background the SDK tries to fetch a bundle (every 60 s) and logs `no bundle yet (no experiment has started): serving control` or `bundle fetch failed (…)`, at most once a minute.
 - `npx next-evolve pull` writes an empty build bundle and never fails the build.
 
@@ -16,8 +16,8 @@ Removing Evolve is the same as never having added it: delete the `<Optimizable>`
 
 ## The cloud becomes unreachable
 
-- **Up to 14 days:** the app serves the last bundle it verified. Experiments keep running with their last weights, events keep being written to your database, and the next aggregate after the outage counts them.
-- **After 14 days** (the bundle's expiry): control for everyone, no new cookies. Events from visitors who already have an `evolve_id` cookie, and server events (`evolve.track`, `/api/evolve/track`), are still written; new visitors aren't recorded.
+- **Up to 14 days:** the app serves the last bundle it verified. Experiments keep running with their last weights, your app keeps writing events to your database, and the next aggregate after the outage counts them.
+- **After 14 days** (the bundle's expiry): control for everyone, no new cookies. The app still writes events from visitors who already have an `evolve_id` cookie, and server events (`evolve.track`, `/api/evolve/track`); it doesn't record new visitors.
 
 ## The site is deleted
 

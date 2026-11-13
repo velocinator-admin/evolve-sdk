@@ -4,7 +4,7 @@ Start with `npx next-evolve doctor`. It checks the env, key, database, bundle, p
 
 ## Setup
 
-**`init`: "A secret key is needed" / "the secret key was rejected".** Pass `--key evk_live_…` (or set `EVOLVE_SECRET_KEY`). The key is shown once when you create the site; if you lost it, issue a new one on the Connect page.
+**`init`: "A secret key is needed" / "the secret key was rejected".** Pass `--key evk_live_…` (or set `EVOLVE_SECRET_KEY`). The dashboard shows the key once, when you create the site; if you lost it, issue a new one on the Connect page.
 
 **`init` printed "Add `<EvolveScript />` … to your root layout".** It couldn't find a place to insert it. Add `import { EvolveScript } from "next-evolve/client"` and put `<EvolveScript />` inside `<body>`.
 
@@ -23,14 +23,14 @@ Start with `npx next-evolve doctor`. It checks the env, key, database, bundle, p
 
 **`doctor`: "CDN routing: config.matcher … doesn't match evolveMatcher(evolveConfig)".** With `cdnRouting` on, the matcher literal in `proxy.ts` must be exactly what `evolveMatcher(evolveConfig)` returns (it changes when you add or remove a route). Re-run `npx next-evolve init --cdn-routing --routes "…"` or paste the literal `doctor` prints.
 
-**`doctor`: "CDN routing: … doesn't call evolveRewrites(evolveConfig)".** The matcher skips the proxy for returning visitors, but nothing serves their variant: they get a **404** on the tested page. Add the `rewrites()` from [configuration.md](configuration.md#cdn-routing-cdnrouting), or turn `cdnRouting` off and put the plain matcher back.
+**`doctor`: "CDN routing: … doesn't call evolveRewrites(evolveConfig)".** The matcher skips the proxy for returning visitors, but nothing serves their variant: they get a 404 on the tested page. Add the `rewrites()` from [configuration.md](configuration.md#cdn-routing-cdnrouting), or turn `cdnRouting` off and put the plain matcher back.
 
 **`doctor`: "CDN routing: cdnRouting is off in evolve.config, but config.matcher … skips the proxy".** You turned `cdnRouting` off but kept its matcher: visitors whose route cookie hasn't expired yet would skip the proxy and get a 404. Set the matcher back to the plain list `doctor` prints.
 
 ## Nothing is being tested
 
 **Every visitor sees control.** In order:
-1. Is the experiment **running** (not draft or paused) and on this exact path? Paths match exactly (a trailing slash is ignored): an experiment on `/pricing` doesn't run on `/pricing/teams`.
+1. Is the experiment running (not draft or paused) and on this exact path? Paths match exactly (a trailing slash is ignored): an experiment on `/pricing` doesn't run on `/pricing/teams`.
 2. Is the route in `evolve.config.ts` and the proxy matcher?
 3. Does the app have a bundle? The log says `no bundle yet` or `bundle fetch failed (401)` (bad key) / `(network)` (cloud unreachable). `doctor` checks it.
 4. Are you a "bot"? Headless browsers, `curl` without a browser user agent, and Lighthouse always get control.
@@ -40,7 +40,7 @@ Start with `npx next-evolve doctor`. It checks the env, key, database, bundle, p
 
 **I keep seeing the same variant.** That's intended: a visitor keeps their assignment. Use a private window (each one is a new visitor), delete the `evolve_id` and `evolve_a` cookies, or use a **Preview** link from the experiment page.
 
-**A change in the dashboard doesn't show up.** The app picks up a new bundle when the sync webhook reaches it (seconds), or by polling: within one poll interval (60 s ± 10% in production, 5 s in development) of an instance's last check, on its next request. The request that triggers the check is still served the old bundle. In local development the webhook can't reach `localhost`, so it's polling only. If production is slow, check the Connect page's "Sync webhook" status. On Vercel without Global Config, only the instance that gets the webhook updates at once.
+**A change in the dashboard doesn't show up.** The app picks up a new bundle when the sync webhook reaches it (seconds), or by polling: within one poll interval (60 s ± 10% in production, 5 s in development) of an instance's last check, on its next request. The request that triggers the check still gets the old bundle. In local development the webhook can't reach `localhost`, so it's polling only. If production is slow, check the Connect page's "Sync webhook" status. On Vercel without Global Config, only the instance that gets the webhook updates at once.
 
 **With `cdnRouting`: a paused experiment still shows its variant to me.** Expected for up to `cdnRouting.maxAgeSeconds` (default 60 s): while your `evolve_r_…` cookie lives, the page is served from the CDN without asking the proxy. After it expires, or with the cookie deleted, you get control. Lower `maxAgeSeconds` if that's too long ([configuration.md](configuration.md#cdn-routing-cdnrouting)).
 
@@ -64,7 +64,7 @@ Start with `npx next-evolve doctor`. It checks the env, key, database, bundle, p
 
 ## Results
 
-**Results show nothing, or not the visit I just made.** Aggregates only count data older than **2 minutes**. Wait and click **Recompute** again (at most once a minute; a second click within a minute does nothing).
+**Results show nothing, or not the visit I just made.** Aggregates only count data older than 2 minutes. Wait and click **Recompute** again (at most once a minute; a second click within a minute does nothing).
 
 **Local development: results never update.** The cloud can't reach `localhost`. Run `npx next-evolve aggregate --upload` (2 minutes after the visits).
 
@@ -77,12 +77,12 @@ Start with `npx next-evolve doctor`. It checks the env, key, database, bundle, p
 - `503 not_configured`: `EVOLVE_SECRET_KEY` or `EVOLVE_WEBHOOK_SECRET` isn't set in the deployed app.
 - Timeout or "no app URL": register it with `npx next-evolve connect --app-url https://…`. It must be a public https URL.
 
-**"Window not elapsed for X% of visitors".** Those visitors' goal windows are still open, so their conversions may still arrive. Not an error.
+**"Window not elapsed for X% of visitors".** Those visitors' goal windows are still open, so their conversions may still arrive. It isn't an error.
 
 ## The site serves control after working for a while
 
 - **The site was deleted.** The log says `this site was deleted in Evolve Cloud: serving control`. The cloud answered `410 site_deleted`, so the app serves control at once. Connect the app to an existing site (a new `EVOLVE_SECRET_KEY`) or remove Evolve.
-- **The bundle expired.** If the app couldn't reach the cloud for 14 days, or the key was revoked, the last bundle expires and every visitor gets control. New visitors aren't recorded; returning visitors' events and server events still are. Fix the connection (check `EVOLVE_SECRET_KEY` and outbound access to `api.evolveab.com`); the next poll restores serving.
+- **The bundle expired.** If the app couldn't reach the cloud for 14 days, or the key was revoked, the last bundle expires and every visitor gets control. The app stops recording new visitors but still records returning visitors' events and server events. Fix the connection (check `EVOLVE_SECRET_KEY` and outbound access to `api.evolveab.com`); the next poll restores serving.
 - `doctor` fails the bundle check when the current bundle is less than 7 days from expiry.
 
 ## Logs

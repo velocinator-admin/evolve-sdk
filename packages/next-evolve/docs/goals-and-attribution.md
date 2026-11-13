@@ -35,9 +35,9 @@ Keys are `a-z`, `0-9` and `_`, starting with a letter, up to 48 characters. Each
 | `where`     | event      | —            | Only events whose props equal these values                                                                                              |
 | `value`     | event      | —            | Makes it a value goal (revenue per visitor instead of conversion rate): a numeric prop path (`"amount"`, `"order.total"`) or a function |
 
-**Value functions run in your app**, when the event is written, and the result is stored with the event. The cloud only learns that the goal has a local value function (`{ kind: "local-fn" }`), never the function. A goal without `value` uses the event's own `value` if it has one.
+Value functions run in your app when it writes the event, and the result is stored with the event. The cloud only learns that the goal has a local value function (`{ kind: "local-fn" }`), never the function. A goal without `value` uses the event's own `value` if it has one.
 
-The goal definitions (not the functions) are sent to the cloud when the app starts, so the dashboard can list them. Changing a goal's definition makes the cloud recount it from the experiment's start.
+When the app starts, it sends the goal definitions (not the functions) to the cloud so the dashboard can list them. Changing a goal's definition makes the cloud recount it from the experiment's start.
 
 ## Firing events
 
@@ -50,25 +50,25 @@ The goal definitions (not the functions) are sent to the cloud when the app star
 | Another service (Segment, a CRM)      | `POST /api/evolve/track` with the bearer secret ([API](api.md#http-routes)) |
 | Stripe                                | `evolve.track` in your Stripe webhook handler ([recipe](stripe.md))         |
 
-Page views are recorded by `<EvolveScript />` automatically, but stored only when a pageview goal matches the path.
+`<EvolveScript />` records page views automatically, and your app stores one only when a pageview goal matches the path.
 
 ## Identity
 
-The visitor's id is the `evolve_id` cookie. Browser events and server events inside a request carry it automatically. Events from elsewhere (webhooks, another device, a background job) only have your user id. Call `evolve.identify(userId)` once when a visitor signs up or signs in to link the two; from then on, events with that `userId` count for the visitor's experiments. The first link for a visitor wins.
+The visitor's id is the `evolve_id` cookie. Browser events and server events inside a request carry it automatically. Events from elsewhere (webhooks, another device, a background job) only have your user id. To link the two, call `evolve.identify(userId)` once when a visitor signs up or signs in. From then on, events with that `userId` count for the visitor's experiments. The first link for a visitor wins.
 
 ## Attribution
 
 For each experiment and goal, Evolve counts, per variant:
 
 - **Units:** visitors (or users, for `unit: "user"`) exposed to the variant. A visitor's variant is the one in their first exposure, and that never changes (intention to treat).
-- **Conversions:** units with at least one matching event in **[first exposure, first exposure + window)**. Events before the exposure don't count.
+- **Conversions:** units with at least one matching event in [first exposure, first exposure + window). Events before the exposure don't count.
 - **Value:** the sum of matching events' values per unit, for value goals.
 
 Events match a unit by visitor id, or by user id through `identify`. Bots, visitors outside the traffic share and preview sessions aren't units.
 
-Results are grouped by the day of each unit's first exposure (UTC), so recent days stay "open" until their window has passed. The experiment page says "Window not elapsed for X% of visitors" while conversions may still arrive. Aggregates only count data older than 2 minutes.
+Evolve groups results by the day of each unit's first exposure (UTC), so recent days stay "open" until their window has passed. The experiment page says "Window not elapsed for X% of visitors" while conversions may still arrive. Aggregates only count data older than 2 minutes.
 
-The SQL runs in your database, triggered by a signed request from the cloud. What comes back is counts and sums only; see [what-leaves-your-server.md](what-leaves-your-server.md).
+A signed request from the cloud triggers the SQL, which runs in your database and returns counts and sums only; see [what-leaves-your-server.md](what-leaves-your-server.md).
 
 ## Reading results
 
